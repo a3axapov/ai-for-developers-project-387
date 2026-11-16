@@ -1,0 +1,23 @@
+server:
+  port: ${PORT:8080}
+
+spring:
+  application:
+    name: calendar
+  jackson:
+    default-property-inclusion: non_null
+    mapper:
+      allow-coercion-of-scalars: false
+    deserialization:
+      accept-float-as-int: false
+
+calendar:
+  public-origin: ${CALENDAR_PUBLIC_ORIGIN:${RENDER_EXTERNAL_URL:http://localhost:8080}}
+  initial:
+    name: Владелец календаря
+    username: owner
+    time-zone: Europe/Moscow
+    booking-enabled: false
+    working-days: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY]
+    work-start: '09:00'
+    work-end: '18:00'

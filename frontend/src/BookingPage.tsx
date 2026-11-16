@@ -1,0 +1,392 @@
+import { useCallback, useEffect, useState } from 'react';
+import { SlotCalendar } from './SlotCalendar';
+import { GuestForm, type GuestContacts } from './GuestForm';
+import {
+  getBookingEntry,
+  getBookingAttempt,
+  submitBookingAttempt,
+  getPublicBookingPage,
+  getPublicMeetingType,
+  type PublicBookingPage,
+  type PublicMeetingTypePage,
+  type PublicMeetingType,
+  type PreparedBookingAttempt,
+  type ApiError,
+} from './api/generated';
+
+type PageState =
+  | { status: 'loading' }
+  | { status: 'ready'; page: PublicBookingPage | PublicMeetingTypePage }
+  | { status: 'error' }
+  | { status: 'not-found' };
+
+function Conditions({ item }: { item: PublicMeetingType }) {
+  return (
+    <>
+      <h3>{item.title}</h3>
+      <p className="meeting-description">{item.description}</p>
+      <p>{item.durationMinutes} мин</p>
+      <p>
+        {item.requiresApproval
+          ? 'Требуется ручное подтверждение'
+          : 'Автоматическое подтверждение'}
+      </p>
+    </>
+  );
+}
+
+export function BookingPage({
+  username,
+  meetingTypeId,
+}: {
+  username?: string;
+  meetingTypeId?: string;
+}) {
+  const [state, setState] = useState<PageState>({ status: 'loading' });
+  const [attempt, setAttempt] = useState(0);
+  const [refusal, setRefusal] = useState('');
+  const [submission, setSubmission] = useState<{
+    attempt: PreparedBookingAttempt;
+    status: 'sending' | 'unknown' | 'checking' | 'prepared' | 'unavailable';
+  }>();
+  const [contacts, setContacts] = useState<GuestContacts>({
+    guestName: '',
+    guestEmail: '',
+    comment: '',
+  });
+  const shownType =
+    state.status === 'ready' && 'meetingType' in state.page
+      ? state.page.meetingType
+      : undefined;
+  const unavailable = useCallback(
+    (reason: 'not-found' | 'disabled' | 'archived') => {
+      setSubmission(undefined);
+      setState((previous) => {
+        if (reason === 'not-found') return { status: 'not-found' };
+        if (previous.status !== 'ready') return previous;
+        return {
+          status: 'ready',
+          page: {
+            ownerName: previous.page.ownerName,
+            ownerTimeZone: previous.page.ownerTimeZone,
+            state: reason === 'archived' ? 'TYPE_ARCHIVED' : 'BOOKING_DISABLED',
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  function definiteFailure(error: ApiError) {
+    setSubmission(undefined);
+    setRefusal(error.message);
+    if (error.code === 'PAGE_NOT_FOUND') unavailable('not-found');
+    else if (error.code === 'BOOKING_DISABLED') unavailable('disabled');
+    else if (error.code === 'TYPE_ARCHIVED') unavailable('archived');
+    else {
+      setState({ status: 'loading' });
+      setAttempt((previous) => previous + 1);
+    }
+  }
+
+  async function submit(prepared: PreparedBookingAttempt) {
+    setSubmission({ attempt: prepared, status: 'sending' });
+    try {
+      const result = await submitBookingAttempt({
+        path: { attemptId: prepared.attemptId },
+        headers: { Authorization: `Bearer ${prepared.attemptSecret}` },
+      });
+      if (result.data) window.location.assign(result.data.resultUrl);
+      else if (
+        result.response &&
+        result.response.status >= 400 &&
+        result.response.status < 500 &&
+        result.error?.code
+      ) {
+        if (result.error.code === 'ATTEMPT_UNAVAILABLE')
+          setSubmission({ attempt: prepared, status: 'unavailable' });
+        else definiteFailure(result.error);
+      } else setSubmission({ attempt: prepared, status: 'unknown' });
+    } catch {
+      setSubmission({ attempt: prepared, status: 'unknown' });
+    }
+  }
+
+  async function query() {
+    if (!submission || submission.status !== 'unknown') return;
+    const prepared = submission.attempt;
+    setSubmission({ attempt: prepared, status: 'checking' });
+    try {
+      const result = await getBookingAttempt({
+        path: { attemptId: prepared.attemptId },
+        headers: { Authorization: `Bearer ${prepared.attemptSecret}` },
+      });
+      if (result.data?.state === 'SUCCEEDED' && result.data.resultUrl) {
+        window.location.assign(result.data.resultUrl);
+        return;
+      }
+      if (result.data?.state === 'PREPARED') {
+        setSubmission({ attempt: prepared, status: 'prepared' });
+        return;
+      }
+      if (result.data?.state === 'FAILED' && result.data.error) {
+        definiteFailure(result.data.error);
+        return;
+      }
+      if (
+        result.response?.status === 410 &&
+        result.error?.code === 'ATTEMPT_UNAVAILABLE'
+      ) {
+        setSubmission({ attempt: prepared, status: 'unavailable' });
+        return;
+      }
+    } catch {
+      // Reading is safe to repeat; failure leaves the original attempt locked.
+    }
+    setSubmission({ attempt: prepared, status: 'unknown' });
+  }
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function load() {
+      try {
+        if (username === undefined) {
+          const { data } = await getBookingEntry({
+            signal: controller.signal,
+            throwOnError: true,
+          });
+          if (!controller.signal.aborted)
+            window.location.replace(data.bookingUrl);
+        } else {
+          const result =
+            meetingTypeId !== undefined
+              ? await getPublicMeetingType({
+                  path: { username, id: meetingTypeId },
+                  signal: controller.signal,
+                })
+              : await getPublicBookingPage({
+                  path: { username },
+                  signal: controller.signal,
+                });
+          if (!controller.signal.aborted) {
+            setState(
+              result.data
+                ? { status: 'ready', page: result.data }
+                : {
+                    status:
+                      result.response?.status === 404 ? 'not-found' : 'error',
+                  },
+            );
+          }
+        }
+      } catch {
+        if (!controller.signal.aborted) setState({ status: 'error' });
+      }
+    }
+    void load();
+    return () => controller.abort();
+  }, [username, meetingTypeId, attempt]);
+
+  if (submission)
+    return (
+      <section className="placeholder">
+        <h1>Отправка бронирования</h1>
+        {submission.status === 'unavailable' ? (
+          <>
+            <p role="alert">
+              Попытка недоступна. Возможен сброс данных. Старую запись
+              невозможно восстановить этой попыткой. Новая запись не создавалась
+              автоматически.
+            </p>
+            <button
+              className="button"
+              onClick={() => {
+                setSubmission(undefined);
+                setRefusal('');
+                setState({ status: 'loading' });
+                setAttempt((previous) => previous + 1);
+              }}
+            >
+              Начать новую запись
+            </button>
+          </>
+        ) : submission.status === 'prepared' ? (
+          <>
+            <p role="status">
+              Бронирование ещё не создано. Можно повторить отправку той же
+              попытки.
+            </p>
+            <button
+              className="button"
+              onClick={() => void submit(submission.attempt)}
+            >
+              Повторить отправку той же попытки
+            </button>
+          </>
+        ) : submission.status !== 'unknown' ? (
+          <p role="status">
+            {submission.status === 'sending'
+              ? 'Отправка записи…'
+              : 'Выяснение результата…'}
+          </p>
+        ) : (
+          <>
+            <p role="alert">
+              Не удалось узнать результат записи. Исход отправки неизвестен.
+              Новая запись заблокирована, чтобы не создать дубликат. Это не
+              подтверждение и не отказ. Сведения попытки сохранены в памяти этой
+              страницы; не закрывайте её.
+            </p>
+            <button className="button" onClick={() => void query()}>
+              Выяснить результат записи
+            </button>
+          </>
+        )}
+        <label>
+          Ваше имя
+          <input readOnly value={contacts.guestName} />
+        </label>
+        <label>
+          Email
+          <input readOnly value={contacts.guestEmail} />
+        </label>
+        <label>
+          Комментарий
+          <textarea readOnly value={contacts.comment} />
+        </label>
+      </section>
+    );
+
+  return (
+    <section
+      className="placeholder"
+      aria-labelledby="page-title"
+      onClick={(event) => {
+        if (
+          event.button !== 0 ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.shiftKey ||
+          event.altKey
+        )
+          return;
+        const link =
+          event.target instanceof Element ? event.target.closest('a') : null;
+        if (
+          !link ||
+          link.target ||
+          !link.pathname.startsWith(`/booking/${encodeURIComponent(username!)}`)
+        )
+          return;
+        event.preventDefault();
+        setState({ status: 'loading' });
+        window.history.pushState(null, '', link.href);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      }}
+    >
+      <p className="eyebrow">Онлайн-запись</p>
+      <h1 id="page-title">
+        {state.status === 'ready'
+          ? state.page.ownerName
+          : state.status === 'not-found'
+            ? 'Страница не найдена'
+            : 'Страница бронирования'}
+      </h1>
+      {state.status === 'loading' && <p role="status">Загрузка страницы…</p>}
+      {refusal && <p role="alert">{refusal}</p>}
+      {state.status === 'ready' &&
+        (state.page.state === 'BOOKING_DISABLED' ? (
+          <>
+            <p>Запись временно недоступна</p>
+            <button
+              className="button"
+              onClick={() => {
+                setState({ status: 'loading' });
+                setAttempt((previous) => previous + 1);
+              }}
+            >
+              Обновить доступность
+            </button>
+          </>
+        ) : state.page.state === 'TYPE_ARCHIVED' ? (
+          <p>Запись на этот тип встречи прекращена</p>
+        ) : 'meetingType' in state.page && state.page.meetingType ? (
+          <>
+            <h2>Выбранный тип встречи</h2>
+            <article className="meeting-card">
+              <Conditions item={state.page.meetingType} />
+            </article>
+            <SlotCalendar
+              key={`${username}/${meetingTypeId}/${attempt}`}
+              username={username!}
+              id={meetingTypeId!}
+              onUnavailable={unavailable}
+              renderSelection={(slot) => (
+                <GuestForm
+                  key={`${slot.startsAt}/${shownType!.conditionsToken}`}
+                  username={username!}
+                  meetingTypeId={meetingTypeId!}
+                  conditionsToken={shownType!.conditionsToken}
+                  slot={slot}
+                  contacts={contacts}
+                  onChange={setContacts}
+                  onUnavailable={unavailable}
+                  onRefusal={(message) => {
+                    setSubmission(undefined);
+                    setRefusal(message);
+                    setState({ status: 'loading' });
+                    setAttempt((previous) => previous + 1);
+                  }}
+                  onSubmitAttempt={(prepared) => void submit(prepared)}
+                />
+              )}
+            />
+          </>
+        ) : 'items' in state.page && state.page.items?.length ? (
+          <>
+            <h2>Выберите тип встречи</h2>
+            {state.page.items.map((item) => (
+              <article className="meeting-card" key={item.id}>
+                <Conditions item={item} />
+                <a
+                  className="button"
+                  href={`/booking/${encodeURIComponent(username!)}/${encodeURIComponent(item.id)}`}
+                >
+                  Выбрать тип «{item.title}»
+                </a>
+              </article>
+            ))}
+          </>
+        ) : (
+          <p>Сейчас нет доступных типов встреч</p>
+        ))}
+      {meetingTypeId !== undefined && state.status === 'ready' && (
+        <p>
+          <a
+            className="button"
+            href={`/booking/${encodeURIComponent(username!)}`}
+          >
+            Все типы встреч
+          </a>
+        </p>
+      )}
+      {state.status === 'error' && (
+        <>
+          <p role="alert">Не удалось загрузить страницу. Попробуйте ещё раз.</p>
+          <button
+            className="button"
+            onClick={() => {
+              setState({ status: 'loading' });
+              setAttempt((previous) => previous + 1);
+            }}
+          >
+            Повторить загрузку
+          </button>
+        </>
+      )}
+      <a className="button" href="/">
+        Вернуться на главную <span aria-hidden="true">↗</span>
+      </a>
+    </section>
+  );
+}

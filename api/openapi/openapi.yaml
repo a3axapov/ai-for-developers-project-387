@@ -1,0 +1,2683 @@
+openapi: 3.0.0
+info:
+  title: Calendar API
+  version: 0.0.0
+tags:
+  - name: Owner
+  - name: Public
+paths:
+  /api/booking-attempts/{attemptId}:
+    get:
+      operationId: getBookingAttempt
+      description: Safely read an attempt with its original Bearer secret, without submitting it. Missing attempts and invalid secrets give the same neutral 410; saved outcomes precede public booking restrictions.
+      parameters:
+        - name: attemptId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Authorization
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingAttemptResult'
+        '410':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Public
+  /api/booking-attempts/{attemptId}/submit:
+    post:
+      operationId: submitBookingAttempt
+      description: Submit immutable prepared data with its Bearer secret. First creation returns 201, successful replay 200 with the current booking. Definite refusals are saved. No request body is accepted.
+      parameters:
+        - name: attemptId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Authorization
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmittedBookingAttempt'
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmittedBookingAttempt'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '410':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Public
+  /api/bookings/{accessToken}:
+    get:
+      operationId: getBookingResult
+      description: Read the current booking using its independent secret link. Unknown links return a neutral BOOKING_NOT_FOUND. Public booking settings do not restrict existing results.
+      parameters:
+        - name: accessToken
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingDetails'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Public
+  /api/bookings/{accessToken}/calendar.ics:
+    get:
+      operationId: downloadBookingCalendar
+      description: Download a private RFC 5545 snapshot of a PENDING or CONFIRMED booking, including past confirmed meetings. Unknown links are neutral; rejected or cancelled bookings return ACTION_NOT_ALLOWED. The absolute result link uses the configured trusted application origin, never request headers. No guest contacts are included.
+      parameters:
+        - name: accessToken
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Content-Disposition:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - attachment; filename="booking.ics"
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+            Referrer-Policy:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-referrer
+          content:
+            text/calendar; charset=utf-8:
+              schema:
+                type: string
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Public
+  /api/bookings/{accessToken}/cancel:
+    post:
+      operationId: cancelGuestBooking
+      description: Explicitly withdraw or cancel the shown booking before its start. An already cancelled booking returns its current result without mutation.
+      parameters:
+        - name: accessToken
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingDetails'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingDecisionCommand'
+  /api/health:
+    get:
+      operationId: getHealth
+      description: Check that the application is running.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /api/owner/bookings:
+    get:
+      operationId: listOwnerBookings
+      description: All types in ascending actual start order. Upcoming is PENDING or CONFIRMED with start strictly after now; history is its complement. Status only narrows the selected view.
+      parameters:
+        - name: view
+          in: query
+          required: true
+          schema:
+            type: string
+          explode: false
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerBookingList'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+  /api/owner/bookings/{id}:
+    get:
+      operationId: getOwnerBooking
+      description: Current owner-only details by booking ID, without result tokens. Reading refreshes approval expiry.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingDetails'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+  /api/owner/bookings/{id}/cancel:
+    post:
+      operationId: cancelOwnerBooking
+      description: Cancel only a CONFIRMED booking strictly before start, including archived types and disabled public booking. Atomically checks expectedVersion, status and time. The UI must identify the meeting and explicitly confirm irreversible release of only its occupancy, without promising a free slot. Preserves details and result link. Uses the shared owner operation journal; repeats return immutable saved outcomes.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingDetails'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingDecisionCommand'
+  /api/owner/bookings/{id}/confirm:
+    post:
+      operationId: confirmOwnerBooking
+      description: Confirm a PENDING booking strictly before start under current availability, excluding its own occupancy. Does not use the guest window or public switch. Preserves saved conditions. Uses the shared owner operation key space.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingDetails'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingDecisionCommand'
+  /api/owner/bookings/{id}/reject:
+    post:
+      operationId: rejectOwnerBooking
+      description: Reject a PENDING booking strictly before start. The UI must explicitly confirm that its occupancy is released and the decision cannot be undone; no textual reason is required. A free slot is not guaranteed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingDetails'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingDecisionCommand'
+  /api/owner/bookings/{id}/reschedule:
+    post:
+      operationId: rescheduleOwnerBooking
+      description: Atomically move a future PENDING/CONFIRMED booking of an active type to a strictly future available start. Retain saved conditions, status and result link; exclude own occupancy. Recheck the original start and version under the shared state lock.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingDetails'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RescheduleBookingCommand'
+  /api/owner/bookings/{id}/reschedule-slots:
+    get:
+      operationId: getOwnerRescheduleSlots
+      description: Current availability for the saved duration, excluding this booking's occupancy. Public booking need not be enabled.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: fromDate
+          in: query
+          required: true
+          schema:
+            type: string
+          explode: false
+        - name: toDate
+          in: query
+          required: true
+          schema:
+            type: string
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RescheduleSlots'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+  /api/owner/calendar:
+    get:
+      operationId: getOwnerCalendar
+      description: Existing bookings overlapping the actual half-open range [from, to), ordered by start. Includes historical and terminal bookings; no separate event copies. From must precede to (422); missing/malformed moments give 400. Manual blocks are not yet implemented.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          explode: false
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerCalendar'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+  /api/owner/meeting-types:
+    post:
+      operationId: createMeetingType
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingType'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMeetingTypeCommand'
+    get:
+      operationId: listMeetingTypes
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingTypeList'
+      tags:
+        - Owner
+  /api/owner/meeting-types/{id}:
+    put:
+      operationId: updateMeetingType
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingType'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMeetingTypeCommand'
+    get:
+      operationId: getMeetingType
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingType'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+  /api/owner/meeting-types/{id}/archive:
+    post:
+      operationId: archiveMeetingType
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingType'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArchiveMeetingTypeCommand'
+  /api/owner/meeting-types/{id}/date-overrides/{date}:
+    put:
+      operationId: putDateOverride
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingType'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DateOverrideCommand'
+    delete:
+      operationId: deleteDateOverride
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingType'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteDateOverrideCommand'
+  /api/owner/meeting-types/{id}/weekly-hours:
+    put:
+      operationId: updateWeeklyHours
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingType'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WeeklyHoursCommand'
+  /api/owner/operations/{key}:
+    get:
+      operationId: getOwnerOperation
+      description: Recover the saved result without executing the command again.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerOperationResult'
+        '410':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+  /api/owner/out-of-office:
+    get:
+      operationId: listOutOfOffice
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutOfOfficeList'
+      tags:
+        - Owner
+    post:
+      operationId: createOutOfOffice
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutOfOffice'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOutOfOfficeCommand'
+  /api/owner/out-of-office/{id}:
+    put:
+      operationId: updateOutOfOffice
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutOfOffice'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOutOfOfficeCommand'
+    delete:
+      operationId: deleteOutOfOffice
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteOutOfOfficeCommand'
+  /api/owner/profile:
+    get:
+      operationId: getOwnerProfile
+      description: Read the calendar owner's profile.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerProfile'
+      tags:
+        - Owner
+    put:
+      operationId: updateOwnerProfile
+      description: Edit name and username without changing booking state. The UI must explicitly confirm the published-link warning before a username change. Uses the shared owner operation key space.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerProfile'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileCommand'
+  /api/owner/public-booking:
+    put:
+      operationId: setPublicBooking
+      description: Explicitly enable or disable public booking, using the shown profile version. An invalid Idempotency-Key returns 400 MALFORMED_REQUEST without changing state or saving an outcome.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerProfile'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicBookingCommand'
+  /api/owner/time-blocks:
+    post:
+      operationId: createTimeBlock
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeBlockResult'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTimeBlockCommand'
+  /api/owner/time-blocks/{id}:
+    put:
+      operationId: updateTimeBlock
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeBlockResult'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTimeBlockCommand'
+    delete:
+      operationId: deleteTimeBlock
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteTimeBlockCommand'
+  /api/owner/time-zone:
+    put:
+      operationId: updateOwnerTimeZone
+      description: Atomically change the owner zone and optionally all active type zones. Actual bookings, blocks and saved vacation zones do not move. New availability consequences require fresh consent.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdempotencyKey'
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerProfile'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeZoneCommand'
+  /api/public/booking-entry/current:
+    get:
+      operationId: getBookingEntry
+      description: Find the current general booking page, including when booking is disabled.
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingEntry'
+      tags:
+        - Public
+  /api/public/{username}:
+    get:
+      operationId: getPublicBookingPage
+      description: Read the general public booking page.
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicBookingPage'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Public
+  /api/public/{username}/booking-attempts:
+    post:
+      operationId: prepareBookingAttempt
+      description: Prepare immutable data without reserving time. Losing this response cannot leave a hidden booking. Availability must be rechecked on later submission.
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreparedBookingAttempt'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrepareBookingAttemptCommand'
+  /api/public/{username}/meeting-types/{id}:
+    get:
+      operationId: getPublicMeetingType
+      description: Read explicitly selected conditions. Unknown username/ID returns 404 even when booking is disabled.
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicMeetingTypePage'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Public
+  /api/public/{username}/meeting-types/{id}/slots:
+    get:
+      operationId: getPublicSlots
+      description: Read all available slots. Unknown addresses return 404 before public-state checks; disabled booking or an archived type returns 409. Guest time zone is not an input.
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The request has succeeded.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicSlots'
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      tags:
+        - Public
+components:
+  schemas:
+    AffectedBooking:
+      type: object
+      required:
+        - id
+        - meetingTypeId
+        - title
+        - guestName
+        - startsAt
+        - endsAt
+        - status
+        - version
+      properties:
+        id:
+          type: string
+        meetingTypeId:
+          type: string
+        title:
+          type: string
+        guestName:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum:
+            - PENDING
+            - CONFIRMED
+        version:
+          type: integer
+          format: int64
+      description: Impact preview only, without result links or attempt credentials. Availability changes show newly invalid future active bookings; time blocks show all overlapping unexpired pending requests, even if already outside availability. Status/version/time changes require fresh consent.
+    ApiError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        currentProfile:
+          $ref: '#/components/schemas/OwnerProfile'
+        currentBooking:
+          $ref: '#/components/schemas/BookingDetails'
+        currentMeetingType:
+          $ref: '#/components/schemas/MeetingType'
+        currentOutOfOffice:
+          $ref: '#/components/schemas/OutOfOffice'
+        currentTimeBlock:
+          $ref: '#/components/schemas/TimeBlock'
+        currentConditions:
+          $ref: '#/components/schemas/PublicMeetingType'
+        fieldErrors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+        affectedBookings:
+          type: array
+          items:
+            $ref: '#/components/schemas/AffectedBooking'
+        confirmationToken:
+          type: string
+    ArchiveMeetingTypeCommand:
+      type: object
+      required:
+        - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+    BookingAttemptResult:
+      type: object
+      required:
+        - state
+      properties:
+        state:
+          type: string
+          enum:
+            - PREPARED
+            - SUCCEEDED
+            - FAILED
+        booking:
+          $ref: '#/components/schemas/BookingDetails'
+        resultUrl:
+          type: string
+        error:
+          $ref: '#/components/schemas/ApiError'
+      description: Read-only saved attempt outcome. PREPARED has no booking; SUCCEEDED includes booking and resultUrl; FAILED includes the saved definite error.
+    BookingDecisionCommand:
+      type: object
+      required:
+        - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 1
+    BookingDetails:
+      type: object
+      required:
+        - id
+        - meetingTypeId
+        - ownerName
+        - ownerTimeZone
+        - title
+        - description
+        - durationMinutes
+        - requiresApproval
+        - startsAt
+        - endsAt
+        - status
+        - guestName
+        - guestEmail
+        - comment
+        - version
+        - allowedActions
+      properties:
+        id:
+          type: string
+        meetingTypeId:
+          type: string
+        ownerName:
+          type: string
+        ownerTimeZone:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        durationMinutes:
+          type: integer
+          format: int32
+        requiresApproval:
+          type: boolean
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum:
+            - CONFIRMED
+            - PENDING
+            - REJECTED
+            - CANCELLED
+        rejectionReason:
+          type: string
+          enum:
+            - APPROVAL_EXPIRED
+        guestName:
+          type: string
+        guestEmail:
+          type: string
+        comment:
+          type: string
+        version:
+          type: integer
+          format: int64
+        allowedActions:
+          type: array
+          items:
+            type: string
+          description: Contains export for PENDING or CONFIRMED (including past CONFIRMED), and cancel only strictly before start. Rejected/cancelled bookings have no actions.
+      description: Saved booking conditions and contacts with current time, status and version.
+    BookingEntry:
+      type: object
+      required:
+        - bookingUrl
+      properties:
+        bookingUrl:
+          type: string
+    CreateMeetingTypeCommand:
+      type: object
+      required:
+        - id
+        - title
+        - description
+        - durationMinutes
+      properties:
+        id:
+          type: string
+          description: 'Immutable, case-sensitive ID: 1–64 ASCII letters, digits or hyphens.'
+        title:
+          type: string
+          description: Nonempty title after collapsing Unicode space separators and trimming. Nonprintable characters are rejected.
+        description:
+          type: string
+          description: At least 20 counted Unicode code points after normalizing spaces per line. Internal newlines remain; newlines, control and invisible characters do not count toward the minimum.
+        durationMinutes:
+          type: integer
+          format: int32
+        requiresApproval:
+          type: boolean
+          default: false
+    CreateOutOfOfficeCommand:
+      type: object
+      required:
+        - startDate
+        - endDate
+      properties:
+        startDate:
+          type: string
+        endDate:
+          type: string
+        confirmationToken:
+          type: string
+    CreateTimeBlockCommand:
+      type: object
+      required:
+        - title
+        - startsAt
+        - endsAt
+      properties:
+        title:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+          description: Literal local date-time and explicit UTC offset must be valid together in the CURRENT owner zone. DST gaps and offsets not offered by that zone are rejected, never shifted.
+        endsAt:
+          type: string
+          format: date-time
+        confirmationToken:
+          type: string
+    DateOverride:
+      type: object
+      required:
+        - date
+        - intervals
+      properties:
+        date:
+          type: string
+        intervals:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkingInterval'
+    DateOverrideCommand:
+      type: object
+      required:
+        - intervals
+        - expectedVersion
+      properties:
+        intervals:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkingInterval'
+          description: Complete replacement for this local date in the type's time zone. Empty means closed, not deletion.
+        expectedVersion:
+          type: integer
+          format: int64
+        confirmationToken:
+          type: string
+    DeleteDateOverrideCommand:
+      type: object
+      required:
+        - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+        confirmationToken:
+          type: string
+    DeleteOutOfOfficeCommand:
+      type: object
+      required:
+        - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+        confirmationToken:
+          type: string
+    DeleteTimeBlockCommand:
+      type: object
+      required:
+        - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+    FieldError:
+      type: object
+      required:
+        - field
+        - code
+        - message
+      properties:
+        field:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+    Health:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - UP
+          description: The application is ready to accept requests.
+      description: Application health response.
+    IdempotencyKey:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: ^[A-Za-z0-9_-]+$
+      description: 'Transport-safe operation key: 1 to 128 ASCII letters, digits, underscores or hyphens.'
+    MeetingType:
+      type: object
+      required:
+        - id
+        - title
+        - description
+        - durationMinutes
+        - requiresApproval
+        - timeZone
+        - version
+        - archived
+        - days
+        - dateOverrides
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        durationMinutes:
+          type: integer
+          format: int32
+        requiresApproval:
+          type: boolean
+        timeZone:
+          type: string
+        version:
+          type: integer
+          format: int64
+        archived:
+          type: boolean
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkingDay'
+        dateOverrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/DateOverride'
+    MeetingTypeList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeetingType'
+    OutOfOffice:
+      type: object
+      required:
+        - id
+        - startDate
+        - endDate
+        - timeZone
+        - version
+      properties:
+        id:
+          type: string
+        startDate:
+          type: string
+        endDate:
+          type: string
+        timeZone:
+          type: string
+        version:
+          type: integer
+          format: int64
+    OutOfOfficeList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutOfOffice'
+    OwnerBookingList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookingDetails'
+      description: Owner-only booking snapshots. No result URLs, access tokens or attempt secrets.
+    OwnerCalendar:
+      type: object
+      required:
+        - items
+        - timeBlocks
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookingDetails'
+        timeBlocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeBlock'
+    OwnerOperationResult:
+      type: object
+      required:
+        - statusCode
+      properties:
+        statusCode:
+          type: integer
+          format: int32
+        profile:
+          $ref: '#/components/schemas/OwnerProfile'
+        meetingType:
+          $ref: '#/components/schemas/MeetingType'
+        outOfOffice:
+          $ref: '#/components/schemas/OutOfOffice'
+        timeBlockResult:
+          $ref: '#/components/schemas/TimeBlockResult'
+        booking:
+          $ref: '#/components/schemas/BookingDetails'
+        error:
+          $ref: '#/components/schemas/ApiError'
+      description: The saved, definite result of an owner command; 204 has no resource. Present resources are command-completion snapshots, not new decisions.
+    OwnerProfile:
+      type: object
+      required:
+        - name
+        - username
+        - timeZone
+        - bookingEnabled
+        - version
+        - bookingUrl
+      properties:
+        name:
+          type: string
+        username:
+          type: string
+        timeZone:
+          type: string
+        bookingEnabled:
+          type: boolean
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+        bookingUrl:
+          type: string
+          description: Same-origin public booking page path.
+      description: The single calendar owner's current profile.
+    PrepareBookingAttemptCommand:
+      type: object
+      required:
+        - meetingTypeId
+        - conditionsToken
+        - startsAt
+        - guestName
+        - guestEmail
+      properties:
+        meetingTypeId:
+          type: string
+        conditionsToken:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        guestName:
+          type: string
+          description: 1–100 Unicode code points after trimming and collapsing spaces; controls and invisible characters are rejected.
+        guestEmail:
+          type: string
+          description: One syntactically valid address, at most 254 Unicode code points after trimming edge spaces.
+        comment:
+          type: string
+          description: At most 2000 Unicode code points. Newlines are allowed, other controls and invisible characters are rejected.
+      description: Immutable future booking data. Preparation creates no booking and reserves no time.
+    PreparedBookingAttempt:
+      type: object
+      required:
+        - attemptId
+        - attemptSecret
+        - state
+      properties:
+        attemptId:
+          type: string
+          description: Random identifier; alone it grants no access.
+        attemptSecret:
+          type: string
+          description: Independent cryptographically random secret of at least 256 bits. Never put in URLs or logs; keep only in page memory.
+        state:
+          type: string
+          enum:
+            - PREPARED
+    ProfileCommand:
+      type: object
+      required:
+        - name
+        - username
+        - expectedVersion
+      properties:
+        name:
+          type: string
+          description: 1–100 Unicode code points after trimming and collapsing Unicode space separators. Control, nonprintable and invisible control characters are rejected before normalization.
+        username:
+          type: string
+          description: Trim edge space separators and lowercase; 3–30 ASCII letters, digits or hyphens, with alphanumeric boundaries.
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 1
+    PublicBookingCommand:
+      type: object
+      required:
+        - enabled
+        - expectedVersion
+      properties:
+        enabled:
+          type: boolean
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 1
+    PublicBookingPage:
+      type: object
+      required:
+        - ownerName
+        - ownerTimeZone
+        - state
+      properties:
+        ownerName:
+          type: string
+        ownerTimeZone:
+          type: string
+        state:
+          type: string
+          enum:
+            - BOOKING_DISABLED
+            - OPEN
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicMeetingType'
+          description: Present only when OPEN; choosing even one item requires an explicit action.
+    PublicMeetingType:
+      type: object
+      required:
+        - id
+        - title
+        - description
+        - durationMinutes
+        - requiresApproval
+        - timeZone
+        - conditionsToken
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        durationMinutes:
+          type: integer
+          format: int32
+        requiresApproval:
+          type: boolean
+        timeZone:
+          type: string
+        conditionsToken:
+          type: string
+          description: Content-derived token over title, description, durationMinutes and requiresApproval only.
+    PublicMeetingTypePage:
+      type: object
+      required:
+        - ownerName
+        - ownerTimeZone
+        - state
+      properties:
+        ownerName:
+          type: string
+        ownerTimeZone:
+          type: string
+        state:
+          type: string
+          enum:
+            - BOOKING_DISABLED
+            - TYPE_ARCHIVED
+            - OPEN
+        meetingType:
+          allOf:
+            - $ref: '#/components/schemas/PublicMeetingType'
+          description: Present only when OPEN.
+    PublicSlots:
+      type: object
+      required:
+        - windowStart
+        - windowEnd
+        - ownerTimeZone
+        - meetingTypeTimeZone
+        - conditionsToken
+        - items
+      properties:
+        windowStart:
+          type: string
+          format: date-time
+        windowEnd:
+          type: string
+          format: date-time
+        ownerTimeZone:
+          type: string
+        meetingTypeTimeZone:
+          type: string
+        conditionsToken:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Slot'
+      description: The complete, guest-independent actual-time window, from tomorrow 00:00 in the current owner zone for 14 calendar days. Every slot fits entirely; ending exactly at windowEnd is allowed.
+    RescheduleBookingCommand:
+      type: object
+      required:
+        - startsAt
+        - expectedVersion
+      properties:
+        startsAt:
+          type: string
+          format: date-time
+        expectedVersion:
+          type: integer
+          format: int64
+    RescheduleSlots:
+      type: object
+      required:
+        - fromDate
+        - toDate
+        - ownerTimeZone
+        - meetingTypeTimeZone
+        - items
+      properties:
+        fromDate:
+          type: string
+          description: Inclusive local date in the current owner zone.
+        toDate:
+          type: string
+          description: Exclusive local date in the current owner zone. No product horizon limit.
+        ownerTimeZone:
+          type: string
+        meetingTypeTimeZone:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Slot'
+    Slot:
+      type: object
+      required:
+        - startsAt
+        - endsAt
+      properties:
+        startsAt:
+          type: string
+          format: date-time
+          description: An actual start on the type-zone 15-minute grid; nonexistent local starts are skipped and repeated starts are returned separately with offsets.
+        endsAt:
+          type: string
+          format: date-time
+          description: Start plus the type's elapsed duration, covered by continuous working time without crossing breaks or bridging repeated working sections.
+    SubmittedBookingAttempt:
+      type: object
+      required:
+        - state
+        - booking
+        - resultUrl
+      properties:
+        state:
+          type: string
+          enum:
+            - SUCCEEDED
+        booking:
+          $ref: '#/components/schemas/BookingDetails'
+        resultUrl:
+          type: string
+    TimeBlock:
+      type: object
+      required:
+        - id
+        - title
+        - startsAt
+        - endsAt
+        - version
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          format: int64
+    TimeBlockResult:
+      type: object
+      required:
+        - timeBlock
+        - rejectedBookingIds
+      properties:
+        timeBlock:
+          $ref: '#/components/schemas/TimeBlock'
+        rejectedBookingIds:
+          type: array
+          items:
+            type: string
+    TimeZoneCommand:
+      type: object
+      required:
+        - timeZone
+        - applyToActiveTypes
+        - expectedVersion
+      properties:
+        timeZone:
+          type: string
+          description: IANA zone ID, using the same policy as initial configuration.
+        applyToActiveTypes:
+          type: boolean
+          description: "Explicit choice: retain existing type zones, or preserve active types' local hours and exception dates in the new zone. Archived types and vacations never change."
+        expectedVersion:
+          type: integer
+          format: int64
+        confirmationToken:
+          type: string
+    UpdateMeetingTypeCommand:
+      type: object
+      required:
+        - title
+        - description
+        - durationMinutes
+        - requiresApproval
+        - expectedVersion
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        durationMinutes:
+          type: integer
+          format: int32
+        requiresApproval:
+          type: boolean
+        expectedVersion:
+          type: integer
+          format: int64
+    UpdateOutOfOfficeCommand:
+      type: object
+      required:
+        - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+      allOf:
+        - $ref: '#/components/schemas/CreateOutOfOfficeCommand'
+    UpdateTimeBlockCommand:
+      type: object
+      required:
+        - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+      allOf:
+        - $ref: '#/components/schemas/CreateTimeBlockCommand'
+    WeeklyHoursCommand:
+      type: object
+      required:
+        - days
+        - expectedVersion
+      properties:
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkingDay'
+          description: Complete replacement; omitted weekdays are closed. Overlapping/touching minute intervals are merged.
+        expectedVersion:
+          type: integer
+          format: int64
+        confirmationToken:
+          type: string
+    WorkingDay:
+      type: object
+      required:
+        - day
+        - intervals
+      properties:
+        day:
+          type: string
+          enum:
+            - MONDAY
+            - TUESDAY
+            - WEDNESDAY
+            - THURSDAY
+            - FRIDAY
+            - SATURDAY
+            - SUNDAY
+        intervals:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkingInterval'
+    WorkingInterval:
+      type: object
+      required:
+        - start
+        - end
+      properties:
+        start:
+          type: string
+        end:
+          type: string

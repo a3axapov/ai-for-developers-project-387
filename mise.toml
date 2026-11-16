@@ -1,0 +1,139 @@
+min_version = "2026.11.6"
+
+[settings]
+experimental = true
+
+[tools]
+java = "temurin-25.0.5+8.0.LTS"
+"npm:npm" = "12.2.2"
+node = "26.13.0"
+hk = "2.12.0"
+pitchfork = "2.34.0"
+
+[env]
+SERVER_PORT = "8080"
+VITE_PORT = "5173"
+VITE_API_TARGET = "http://127.0.0.1:8080"
+IMAGE_NAME = "calendar:local"
+
+[hooks]
+postinstall = { task = "install" }
+
+[tasks.install]
+description = "Install locked npm dependencies and Git hooks"
+run = ["npm ci", "mise run hooks:install"]
+
+[tasks."hooks:install"]
+description = "Install hk hooks locally (not in CI or Docker)"
+run = 'if [ -z "${CI:-}" ] && [ -e .git ]; then hk install; fi'
+
+[tasks."api:generate"]
+description = "Generate OpenAPI, Spring interfaces/models and the TypeScript SDK from TypeSpec"
+run = "npm run api:generate"
+
+[tasks."api:check"]
+description = "Check that committed API artifacts match TypeSpec"
+run = "npm run api:check"
+
+[tasks.lint]
+description = "Check Java, TypeScript, TypeSpec and formatting"
+run = ["npm run lint", "./gradlew --no-daemon checkstyleMain checkstyleTest"]
+
+[tasks.format]
+description = "Format frontend, API source and project configuration"
+run = ["npm run format", "npm exec -- tsp format api/main.tsp"]
+
+[tasks.typecheck]
+run = "npm run typecheck"
+
+[tasks.audit]
+description = "Report npm advisories (including build-time dependencies)"
+run = "npm audit"
+
+[tasks.doctor]
+description = "Quick read-only tool, Chromium and browser-port diagnostics (no build)"
+run = "node scripts/doctor.mjs"
+
+[tasks.checkpoint]
+description = "Save or validate a local ticket checkpoint in Git common metadata"
+run = "node scripts/checkpoint.mjs"
+
+[tasks."test:tools"]
+description = "Test maintenance CLI boundaries and generated-file comparison"
+run = "node --test scripts/tests/*.test.mjs"
+
+[tasks."api:routes"]
+description = "Reject overlapping routes resolved from TypeSpec source"
+run = "node scripts/check-routes.mjs"
+
+[tasks.test]
+description = "Run JUnit tests, including a real HTTP smoke test"
+run = "./gradlew --no-daemon test"
+
+[tasks."test:browser:install"]
+description = "Install Chromium and its system dependencies for Playwright"
+run = "npm exec --workspace frontend -- playwright install --with-deps chromium"
+
+[tasks."test:browser"]
+description = "Run all real-server browser tests (parallel locally, sequential in CI)"
+run = 'if [ -n "${CI:-}" ]; then mise run test:browser:sequential; else mise run test:browser:parallel; fi'
+
+[tasks."test:browser:sequential"]
+description = "Build once and run all browser projects sequentially"
+run = "npm run test:e2e --workspace frontend"
+
+[tasks."test:browser:parallel"]
+description = "Build once and run desktop and mobile groups on isolated ports"
+run = "npm run test:e2e:parallel --workspace frontend --"
+
+[tasks."test:browser:targeted"]
+description = "Build the application and run selected Playwright tests (pass a file or --grep)"
+run = "npm run test:e2e --workspace frontend --"
+
+[tasks.build]
+description = "Build a runnable JAR containing the frontend"
+run = "./gradlew --no-daemon build"
+
+[tasks."check:fast"]
+description = "Check generated artifacts, lint, types and JUnit (without browser tests)"
+run = [
+  "mise run test:tools",
+  "mise run api:routes",
+  "mise run api:check",
+  "mise run lint",
+  "mise run typecheck",
+  "mise run test",
+]
+
+[tasks.check]
+description = "Run the full local/CI gate, including browser tests"
+run = [
+  "mise run check:fast",
+  "mise run test:browser",
+]
+
+[tasks.dev]
+description = "Start backend and frontend in the background"
+depends = ["api:generate"]
+run = "mise daemons start"
+
+[tasks.stop]
+run = "mise daemons stop"
+
+[tasks."image:build"]
+description = "Build the production image"
+run = 'docker build --tag "$IMAGE_NAME" .'
+
+[tasks."image:test"]
+description = "Smoke-test HTTP API and frontend in the production image"
+run = "node scripts/smoke-image.mjs"
+
+[daemons.backend]
+run = "exec ./gradlew --no-daemon bootRun"
+ready_port = 8080
+ready_cmd = "node scripts/wait-http.mjs http://127.0.0.1:8080/api/health"
+
+[daemons.frontend]
+run = "exec npm run dev --workspace frontend"
+depends = ["backend"]
+ready_port = 5173

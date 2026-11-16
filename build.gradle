@@ -1,0 +1,97 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '4.1.2'
+	id 'io.spring.dependency-management' version '1.1.7'
+	id 'checkstyle'
+}
+
+group = 'com.testproject'
+version = '0.0.1-SNAPSHOT' // x-release-please-version
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+configurations {
+	openApiGenerator
+}
+
+dependencies {
+	openApiGenerator('org.openapitools:openapi-generator-cli:7.27.0') { transitive = false }
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	testImplementation 'org.springframework.boot:spring-boot-starter-actuator-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+sourceSets.main.java.srcDir('api/server/src/main/java')
+
+tasks.register('generateServerContract', JavaExec) {
+	description = 'Generate Spring interfaces and transport models from OpenAPI'
+	classpath = configurations.openApiGenerator
+	mainClass = 'org.openapitools.codegen.OpenAPIGenerator'
+	args 'generate',
+		'-i', providers.gradleProperty('apiInput').getOrElse('api/openapi/openapi.yaml'),
+		'-o', providers.gradleProperty('apiOutput').getOrElse('api/server'),
+		'-c', 'api/server-generator.json'
+}
+
+checkstyle {
+	toolVersion = '14.4.0'
+	maxWarnings = 0
+}
+
+tasks.named('checkstyleMain') {
+	exclude 'com/testproject/calendar/generated/**'
+}
+
+dependencyLocking {
+	lockAllConfigurations()
+	lockMode = LockMode.STRICT
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
+
+tasks.register('frontendBuild', Exec) {
+	description = 'Generate the API client and build the frontend'
+	workingDir = projectDir
+	commandLine 'npm', 'run', 'build'
+	doFirst {
+		// The Node codegen driver uses this JVM classpath instead of nesting Gradle inside Gradle.
+		environment 'CALENDAR_GENERATOR_CLASSPATH', configurations.openApiGenerator.asPath
+	}
+	inputs.files('package.json', 'package-lock.json')
+	inputs.dir('api')
+	inputs.dir('scripts')
+	inputs.files(fileTree('frontend') {
+		exclude 'node_modules/**', 'dist/**'
+	})
+	outputs.dir('frontend/dist')
+	onlyIf { !project.hasProperty('frontendPrebuilt') }
+}
+
+tasks.named('compileJava') {
+	mustRunAfter tasks.named('frontendBuild')
+}
+
+tasks.named('bootJar') {
+	dependsOn tasks.named('frontendBuild')
+	archiveFileName = 'calendar.jar'
+	from('frontend/dist') {
+		into 'BOOT-INF/classes/static'
+	}
+	doFirst {
+		if (!file('frontend/dist/index.html').isFile()) {
+			throw new GradleException('Frontend is missing. Run npm run build first.')
+		}
+	}
+}
