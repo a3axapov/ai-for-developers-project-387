@@ -824,7 +824,7 @@ opencode mcp list
 - Автор: только `OWNER`, `MEMBER` или `COLLABORATOR`. Комментарии ботов
   игнорируются. Комментарии к PR и PR из fork не обрабатываются, поэтому
   недоверенный код не попадает на раннер с секретами.
-- Модель: `opencode/kimi-k3`. Ключ хранится в GitHub Actions secret
+- Модель: `opencode/deepseek-v4.1-flash` с reasoning `low`. Ключ хранится в GitHub Actions secret
   `OPENCODE_API_KEY` и не попадает в репозиторий.
 - Авторизация: установлен GitHub App `opencode-agent`; воркфлоу использует OIDC
   (`id-token: write`) и получает токен приложения. Поэтому у задания только
@@ -833,9 +833,16 @@ opencode mcp list
   и открыть PR. Прямой push в `main` и merge не выполняются.
 - Результат: комментарий агента в issue, ссылка на PR (если были изменения)
   и запуск в Actions.
-- `share: false`: сессии не публикуются, потому что репозиторий публичный.
+- Сессии не публикуются, потому что репозиторий публичный: воркфлоу передаёт
+  `SHARE: "false"`, а конфиг OpenCode по умолчанию (`share: manual`) ничего не
+  публикует автоматически.
 - Ограничения запуска: `timeout-minutes: 60` и `concurrency` по номеру issue;
   одновременно по одному issue выполняется один запуск.
+- Запуск: воркфлоу ставит OpenCode CLI `1.19.6` через `opencode.ai/install`
+  (установщик ставит OpenCode 1, в котором есть `opencode github run`), затем
+  вызывает `opencode github run`. Composite-экшен `anomalyco/opencode/github`
+  не используется: upstream удалил его, а его шаг определения версии падал
+  на неавторизованном запросе к API GitHub.
 
 Команды:
 
@@ -846,11 +853,11 @@ opencode mcp list
 
 `mentions` задан как `/opencode,/oc`; другие фразы не запускают агента.
 
-Если GitHub App установить нельзя, воркфлоу можно переключить на
-`use_github_token: true`: тогда `id-token` не нужен, но требуются
-`contents: write`, `pull-requests: write`, `issues: write`, а checkout
-оставляет `persist-credentials: true`. Отличие: агент действует от
-`GITHUB_TOKEN`, а не от отдельного приложения, и получает более широкие права.
+Если GitHub App установить нельзя, воркфлоу можно переключить на `USE_GITHUB_TOKEN: "true"`.
+Тогда `id-token` не нужен, но требуются `contents: write`, `pull-requests: write`,
+`issues: write`, а в env задания нужно передать `GITHUB_TOKEN: ${{ github.token }}`.
+Отличие: агент действует от `GITHUB_TOKEN`, а не от отдельного приложения, и получает
+более широкие права.
 
 Перед первым запуском:
 

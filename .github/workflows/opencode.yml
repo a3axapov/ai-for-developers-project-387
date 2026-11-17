@@ -34,11 +34,16 @@ jobs:
         with:
           version: 2026.11.6
 
-      - name: Run OpenCode
-        uses: anomalyco/opencode/github@77fc88c8ade8e5a620ebbe1197f3a572d29ae91a # latest
+      - name: Install opencode
+        run: |
+          curl -fsSL https://opencode.ai/install | bash -s -- --version 1.19.6 --no-modify-path
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: Run opencode
         env:
+          MODEL: opencode/deepseek-v4.1-flash
+          VARIANT: low
+          MENTIONS: /opencode,/oc
+          SHARE: 'false'
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-        with:
-          model: opencode/kimi-k3
-          mentions: /opencode,/oc
-          share: false
+        run: opencode github run
