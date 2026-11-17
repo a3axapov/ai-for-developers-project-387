@@ -77,6 +77,8 @@
 - It follows this file and `docs/agents/`; project skills are in `.agents/skills/`.
 - It may create a branch and open a PR, but must not push to `main` or merge. The coordinator reviews and merges.
 - Do not print secrets or enable session sharing; the workflow uses `share: false`.
+- CI already authenticates `gh` through the GitHub App. Do not read `~/.config/gh/hosts.yml` or inspect tokens through `env`; use `gh auth status` if needed, then call `gh` directly.
+- Use non-interactive commands in CI: `gh issue create --title ... --body-file ...`, `git commit -m ...`, `gh pr create --title ... --body ...`.
 
 ## Agent skills
 
