@@ -5,8 +5,6 @@ frontend/dist/
 frontend/test-results/
 frontend/playwright-report/
 *.tsbuildinfo
-.agents/
-skills-lock.json
 .idea/
 .vscode/
 *.iml

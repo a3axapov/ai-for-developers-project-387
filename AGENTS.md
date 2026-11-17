@@ -70,6 +70,14 @@
 - `mise run audit` is separate from `check`; a passing check is not a clean security audit.
 - Read `README.md` for product scope before implementing booking features.
 
+## GitHub Actions agent
+
+- Workflow: `.github/workflows/opencode.yml`; setup, model, commands and results: README section «GitHub-агент».
+- The agent runs only for `/opencode` or `/oc` comments from `OWNER`, `MEMBER` or `COLLABORATOR`; bot comments and PR/fork comments are ignored.
+- It follows this file and `docs/agents/`; project skills are in `.agents/skills/`.
+- It may create a branch and open a PR, but must not push to `main` or merge. The coordinator reviews and merges.
+- Do not print secrets or enable session sharing; the workflow uses `share: false`.
+
 ## Agent skills
 
 ### Issue tracker

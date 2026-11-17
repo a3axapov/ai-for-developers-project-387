@@ -814,6 +814,55 @@ opencode mcp list
 команда останавливает демон, после старта `opencode mcp list` показывает
 `render connected`.
 
+### GitHub-агент
+
+В репозитории настроен агент OpenCode, который запускается командой в issue.
+Воркфлоу лежит в `.github/workflows/opencode.yml`.
+
+- Событие: `issue_comment` с `types: [created]`. Команда — `/opencode` или `/oc`
+  в комментарии к issue.
+- Автор: только `OWNER`, `MEMBER` или `COLLABORATOR`. Комментарии ботов
+  игнорируются. Комментарии к PR и PR из fork не обрабатываются, поэтому
+  недоверенный код не попадает на раннер с секретами.
+- Модель: `opencode/kimi-k3`. Ключ хранится в GitHub Actions secret
+  `OPENCODE_API_KEY` и не попадает в репозиторий.
+- Авторизация: установлен GitHub App `opencode-agent`; воркфлоу использует OIDC
+  (`id-token: write`) и получает токен приложения. Поэтому у задания только
+  `contents: read`, а checkout идёт с `persist-credentials: false`.
+- Назначение: разобрать issue, ответить в нём, при реализации — создать ветку
+  и открыть PR. Прямой push в `main` и merge не выполняются.
+- Результат: комментарий агента в issue, ссылка на PR (если были изменения)
+  и запуск в Actions.
+- `share: false`: сессии не публикуются, потому что репозиторий публичный.
+- Ограничения запуска: `timeout-minutes: 60` и `concurrency` по номеру issue;
+  одновременно по одному issue выполняется один запуск.
+
+Команды:
+
+```text
+/oc объясни задачу
+/opencode исправь это
+```
+
+`mentions` задан как `/opencode,/oc`; другие фразы не запускают агента.
+
+Если GitHub App установить нельзя, воркфлоу можно переключить на
+`use_github_token: true`: тогда `id-token` не нужен, но требуются
+`contents: write`, `pull-requests: write`, `issues: write`, а checkout
+оставляет `persist-credentials: true`. Отличие: агент действует от
+`GITHUB_TOKEN`, а не от отдельного приложения, и получает более широкие права.
+
+Перед первым запуском:
+
+1. Установить [opencode-agent](https://github.com/apps/opencode-agent)
+   на репозиторий.
+2. Добавить `OPENCODE_API_KEY` в **Settings → Secrets and variables → Actions**.
+3. Замержить воркфлоу в `main`.
+4. Создать issue и написать `/oc объясни задачу`.
+
+Скиллы первого проекта лежат в `.agents/skills/`, настройки трекера —
+в `docs/agents/`; на свежем раннере они доступны после checkout.
+
 ### Технический долг
 
 Объединение Docker-проверок в одну команду и политика npm audit отложены;
