@@ -40,10 +40,18 @@ jobs:
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 
       - name: Run opencode
+        timeout-minutes: 15
         env:
           MODEL: opencode/deepseek-v4.1-flash
           VARIANT: low
           MENTIONS: /opencode,/oc
           SHARE: 'false'
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_CONFIG_CONTENT: |
+            {
+              "permission": {
+                "external_directory": "deny",
+                "doom_loop": "deny"
+              }
+            }
         run: opencode github run

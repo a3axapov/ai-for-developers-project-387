@@ -836,8 +836,12 @@ opencode mcp list
 - Сессии не публикуются, потому что репозиторий публичный: воркфлоу передаёт
   `SHARE: "false"`, а конфиг OpenCode по умолчанию (`share: manual`) ничего не
   публикует автоматически.
-- Ограничения запуска: `timeout-minutes: 60` и `concurrency` по номеру issue;
-  одновременно по одному issue выполняется один запуск.
+- Ограничения запуска: `timeout-minutes: 60` у job, `timeout-minutes: 15`
+  у шага `Run opencode` и `concurrency` по номеру issue; одновременно
+  по одному issue выполняется один запуск.
+- Защита от зависания на permission-запросах: `OPENCODE_CONFIG_CONTENT`
+  запрещает `external_directory` и `doom_loop`. В CI некому подтвердить
+  `ask`, поэтому такие запросы завершаются отказом, а не ожиданием.
 - Запуск: воркфлоу ставит OpenCode CLI `1.19.6` через `opencode.ai/install`
   (установщик ставит OpenCode 1, в котором есть `opencode github run`), затем
   вызывает `opencode github run`. Composite-экшен `anomalyco/opencode/github`
