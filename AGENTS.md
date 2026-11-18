@@ -72,10 +72,12 @@
 
 ## GitHub Actions agent
 
-- Workflow: `.github/workflows/opencode.yml`; setup, model, commands and results: README section «GitHub-агент».
-- The agent runs only for `/opencode` or `/oc` comments from `OWNER`, `MEMBER` or `COLLABORATOR`; bot comments and PR/fork comments are ignored.
-- It follows this file and `docs/agents/`; project skills are in `.agents/skills/`.
-- It may create a branch and open a PR, but must not push to `main` or merge. The coordinator reviews and merges.
+- Workflows: `.github/workflows/opencode.yml` for `/opencode` and `/oc` comments and `.github/workflows/opencode-triage.yml` for auto-triage of new issues; setup and results: README sections «GitHub-агент» and «Автотриаж новых обращений».
+- The comment agent runs only for `/opencode` or `/oc` comments from `OWNER`, `MEMBER` or `COLLABORATOR`; bot comments and PR/fork comments are ignored.
+- Auto-triage runs on `issues: [opened]` for `OWNER`, `MEMBER` or `COLLABORATOR` and skips issues carrying any state label from `docs/agents/triage-labels.md`. Tickets published by `to-tickets` arrive with `ready-for-agent` and are not re-triaged.
+- Triage only reads, comments and applies `needs-triage`/`needs-info` plus `bug`/`enhancement`; it must not change code, create branches or PRs, close issues, or apply `ready-for-agent`, `ready-for-human`, `wontfix`.
+- Both agents follow this file and `docs/agents/`; project skills are in `.agents/skills/`.
+- The comment agent may create a branch and open a PR, but must not push to `main` or merge. The coordinator reviews and merges.
 - Do not print secrets or enable session sharing; the workflow uses `share: false`.
 - CI already authenticates `gh` through the GitHub App. Do not read `~/.config/gh/hosts.yml` or inspect tokens through `env`; use `gh auth status` if needed, then call `gh` directly.
 - Use non-interactive commands in CI: `gh issue create --title ... --body-file ...`, `git commit -m ...`, `gh pr create --title ... --body ...`.
