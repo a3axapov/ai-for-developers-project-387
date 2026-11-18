@@ -18,6 +18,13 @@ Communication to and from subagents should be sparse. Communicate primarily thro
 
 **Implementer subagents** should be run in the background where possible for maximum concurrency.
 
+## Review boundaries
+
+- Internal review is the `code-review` skill on the integration branch. It is separate from GitHub auto-review and remains the authoritative internal gate.
+- Never poll, watch or react to bot review comments, and never fix them automatically.
+- Only a human `/oc` command selects findings for fixing. Treat its findings like a ticket: fix them in a fresh implementer subagent with a separate commit, never rewrite published history.
+- After any external edit (human, `/oc`, or another agent), run the full `mise run check` again on the resulting tree before the human merge decision. GitHub auto-review is evidence, not approval; the human decides on merge.
+
 ## Steps
 
 1. Read the spec and tickets to understand the task graph.
