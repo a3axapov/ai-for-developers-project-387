@@ -822,8 +822,9 @@ opencode mcp list
 - Событие: `issue_comment` с `types: [created]`. Команда — `/opencode` или `/oc`
   в комментарии к issue.
 - Автор: только `OWNER`, `MEMBER` или `COLLABORATOR`. Комментарии ботов
-  игнорируются. Комментарии к PR и PR из fork не обрабатываются, поэтому
-  недоверенный код не попадает на раннер с секретами.
+  игнорируются. Обращения обслуживает отдельное задание `opencode`; команду
+  в pull request — отдельное задание `pr-command`, а PR из fork игнорируются,
+  поэтому недоверенный код не попадает на раннер с секретами.
 - Модель: `opencode/deepseek-v4.1-flash` с reasoning `low`. Ключ хранится в GitHub Actions secret
   `OPENCODE_API_KEY` и не попадает в репозиторий.
 - Авторизация: установлен GitHub App `opencode-agent`; воркфлоу использует OIDC
@@ -838,7 +839,8 @@ opencode mcp list
   публикует автоматически.
 - Ограничения запуска: `timeout-minutes: 60` у job, `timeout-minutes: 15`
   у шага `Run opencode` и `concurrency` по номеру issue; одновременно
-  по одному issue выполняется один запуск.
+  по одному issue выполняется один запуск. Это ограничения задания `opencode`;
+  у команды в PR свои таймауты, они описаны ниже.
 - Защита от зависания на permission-запросах: `OPENCODE_CONFIG_CONTENT`
   запрещает `external_directory` и `doom_loop`. В CI некому подтвердить
   `ask`, поэтому такие запросы завершаются отказом, а не ожиданием.
@@ -856,6 +858,23 @@ opencode mcp list
 ```
 
 `mentions` задан как `/opencode,/oc`; другие фразы не запускают агента.
+
+#### Команда `/oc` в pull request
+
+Комментарий `/oc` или `/opencode` к pull request обслуживает отдельное задание
+`pr-command` в том же `.github/workflows/opencode.yml`:
+
+- обрабатываются только PR этого же репозитория от `OWNER`, `MEMBER` или
+  `COLLABORATOR`. Комментарии ботов, внешних авторов и PR из fork игнорируются;
+  решение принимает `scripts/pr-command-gate.mjs`;
+- checkout идёт по `refs/pull/<N>/head`, а инструкции агенту — в
+  `docs/agents/pr-command.md`;
+- агент пушит только отдельные коммиты Conventional Commits в head-ветку PR,
+  никогда в `main`, и не мержит PR;
+- таймаут задания — 120 минут, шага агента — 60 минут; одновременно по одному
+  PR выполняется один запуск;
+- в комментарии PR публикуются доказательства: команды, коды возврата, число
+  тестов, точный SHA и ссылка на CI.
 
 Если GitHub App установить нельзя, воркфлоу можно переключить на `USE_GITHUB_TOKEN: "true"`.
 Тогда `id-token` не нужен, но требуются `contents: write`, `pull-requests: write`,
@@ -881,6 +900,83 @@ GitHub App `opencode-agent` — стороннее приложение `anomaly
 установку приложения. Поэтому workflow-файлы в `.github/workflows/` готовит и
 мержит человек. `implement-spec` не пушит их и не считает тикет выполненным,
 пока человек не смержит изменение. Обход через `pull_request_target` запрещён.
+
+Bootstrap-ограничение: workflow-файлы попадают в `main` только человеческим
+merge, а воркфлоу на `issue_comment` запускаются исключительно с ветки по
+умолчанию. Поэтому bootstrap-PR с новыми workflow нужно смержить первым: до
+этого `/oc` в PR и авторевью не работают, даже если файлы уже лежат в ветке PR.
+
+### Авторевью PR
+
+Отдельный воркфлоу `.github/workflows/opencode-review.yml` автоматически
+проверяет pull request и публикует отчёт. Полный процесс, роли и правила
+согласования описаны в [docs/agents/review.md](docs/agents/review.md).
+
+- Триггеры: `pull_request` с типами `opened`, `synchronize`, `reopened`,
+  `ready_for_review` и `edited`. Событие `edited` учитывается только при
+  изменении тела PR, а не заголовка или меток.
+- Отбор: только нечерновиковые PR этого же репозитория от точного списка
+  доверенных авторов — `OWNER`, `MEMBER`, `COLLABORATOR` и `opencode-agent[bot]`.
+  Остальные боты (dependabot, github-actions, release-please) и PR из fork
+  уходят в ручное ревью и намеренно не получают статус-комментарий.
+- Checkout: точный `head.sha`, а не merge-ref. `REVIEW.md` и `AGENTS.md`
+  читаются из базовой ветки, поэтому PR не может подменить критерии ревью.
+- Авторизация: `GITHUB_TOKEN` (`USE_GITHUB_TOKEN: "true"`), без `id-token`.
+  Права задания: `contents: read`, `pull-requests: write`, `issues: write`,
+  `actions: read`, `checks: read`, `statuses: read`.
+- Таймауты: 75 минут у job и 60 минут у шага модели. `concurrency`
+  по номеру PR отменяет устаревшее ревью, когда приходит новый push.
+- Результат: общий комментарий и inline-комментарии к строкам diff.
+  Публикуется только `COMMENT`, без `APPROVE` и `REQUEST_CHANGES`.
+- Статусы видны комментариями в PR, а не commit status: `reviewed@<sha>` —
+  отчёт для точного head-SHA; `limit-reached` — лимит исчерпан; `error` —
+  ревью не запускалось или отчёт не опубликован. Отдельные commit statuses
+  не используются, потому что они не закрывают required-проверку `check`.
+- Лимит: 5 попыток на PR. Попытка резервируется скрытым маркером-комментарием
+  до вызова модели, поэтому отменённый после резерва запуск расходует лимит.
+  Ошибка GitHub API означает, что модель не вызывается, и публикуется `error`.
+- Отсутствие отчёта никогда не означает «замечаний нет»: это отдельный статус,
+  требующий человеческого решения.
+
+### Защита `main`
+
+Ветка `main` защищена через GitHub branch protection:
+
+- обязательный pull request перед merge;
+- обязательная успешная проверка `check` (job `check` в CI);
+- требование актуальной базовой ветки (`strict: true`): устаревший PR нужно
+  обновить и прогнать CI заново;
+- force push и удаление ветки запрещены;
+- правила применяются и к администраторам (`enforce_admins: true`).
+
+Фактическое состояние на момент настройки, полученное через API
+`GET /repos/a3axapov/ai-for-developers-project-387/branches/main/protection`:
+
+```json
+{
+  "required_status_checks": { "strict": true, "contexts": ["check"] },
+  "required_pull_request_reviews": { "required_approving_review_count": 0 },
+  "enforce_admins": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+```
+
+`required_approving_review_count: 0` означает, что PR обязателен, но GitHub не
+требует формального approve. Причина — ограничение единственного мейнтейнера:
+GitHub запрещает self-approval, поэтому владелец не может одобрить собственный
+PR. Человеческое одобрение фиксируется комментарием к PR или к issue
+спецификации с явным решением и проверенным SHA; это и есть человеческий шлюз.
+Авторевью не заменяет approve: контекст `check`, `strict: true`,
+`enforce_admins: true`, обязательный PR, запрет force push и удаления
+настроены через API. Ещё предстоит живая проверка, что красный или устаревший
+PR действительно блокирует merge: это проверяется на реальном PR после
+включения защиты, через API это не доказать.
+
+Если план GitHub или права когда-нибудь не позволят включить защиту, остаётся
+ручной fallback: обязательные проверки и человеческое одобрение
+контролируются перед merge вручную, а ограничение фиксируется в README и
+тикете.
 
 ### Автотриаж новых обращений
 
