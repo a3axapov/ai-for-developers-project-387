@@ -55,3 +55,104 @@ jobs:
               }
             }
         run: opencode github run
+
+  gate:
+    if: github.event.issue.pull_request != null
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      allowed: ${{ steps.gate.outputs.allowed }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Decide whether the command is trusted
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          gh pr view "$PR" \
+            --json number,state,headRepository,isCrossRepository \
+            > "$RUNNER_TEMP/pr.json"
+          node scripts/pr-command-gate.mjs \
+            --event "$GITHUB_EVENT_PATH" \
+            --pr "$RUNNER_TEMP/pr.json" \
+            > "$RUNNER_TEMP/gate.json"
+          cat "$RUNNER_TEMP/gate.json"
+          echo "allowed=$(jq -r .allowed "$RUNNER_TEMP/gate.json")" >> "$GITHUB_OUTPUT"
+
+  pr-command:
+    needs: gate
+    if: needs.gate.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    concurrency:
+      group: opencode-pr-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      checks: read
+      id-token: write
+    steps:
+      - name: Checkout pull request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch the base branch and record its SHA
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          base_ref=$(gh pr view "$PR" --json baseRefName --jq .baseRefName)
+          git fetch --no-tags origin "+refs/heads/$base_ref:refs/remotes/origin/$base_ref"
+          base_sha=$(git rev-parse "origin/$base_ref^{commit}")
+          echo "base_ref=$base_ref" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+          echo "Base branch: \`$base_ref\` at \`$base_sha\`." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install project tools
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+
+      - name: Install opencode
+        run: |
+          curl -fsSL https://opencode.ai/install | bash -s -- --version 1.19.6 --no-modify-path
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: Run opencode
+        timeout-minutes: 60
+        env:
+          MODEL: opencode/deepseek-v4.1-flash
+          VARIANT: low
+          MENTIONS: /opencode,/oc
+          SHARE: 'false'
+          BASE_REF_NAME: ${{ steps.base.outputs.base_ref }}
+          BASE_SHA: ${{ steps.base.outputs.base_sha }}
+          GH_TOKEN: ${{ github.token }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_CONFIG_CONTENT: |
+            {
+              "instructions": ["docs/agents/pr-command.md"],
+              "permission": {
+                "external_directory": "deny",
+                "doom_loop": "deny"
+              }
+            }
+        run: opencode github run
