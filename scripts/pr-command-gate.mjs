@@ -63,17 +63,33 @@ export function decidePrCommand({
   return { allowed: reasons.length === 0, reasons };
 }
 
+const SUPPORTED_EVENT_NAMES = Object.freeze(['issue_comment']);
+const USAGE =
+  'Usage: pr-command-gate.mjs --event FILE --pr FILE [--event-name issue_comment]';
+
 function parseArguments(argv) {
+  const flags = {
+    '--event': 'event',
+    '--pr': 'pr',
+    '--event-name': 'eventName',
+  };
   const values = {};
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index];
     const value = argv[index + 1];
-    if (!['--event', '--pr'].includes(flag) || !value)
-      throw new Error('Usage: pr-command-gate.mjs --event FILE --pr FILE');
-    values[flag.slice(2)] = value;
+    const key = flags[flag];
+    if (!key || !value) throw new Error(USAGE);
+    values[key] = value;
   }
-  if (!values.event || !values.pr)
-    throw new Error('Usage: pr-command-gate.mjs --event FILE --pr FILE');
+  if (!values.event || !values.pr) throw new Error(USAGE);
+  if (
+    values.eventName !== undefined &&
+    !SUPPORTED_EVENT_NAMES.includes(values.eventName)
+  ) {
+    throw new Error(
+      `${USAGE}\nUnsupported --event-name: ${values.eventName}; expected issue_comment`,
+    );
+  }
   return values;
 }
 
@@ -96,9 +112,11 @@ async function readJson(path, label) {
 }
 
 async function main() {
-  const { event: eventPath, pr: prPath } = parseArguments(
-    process.argv.slice(2),
-  );
+  const {
+    event: eventPath,
+    pr: prPath,
+    eventName,
+  } = parseArguments(process.argv.slice(2));
   const event = await readJson(eventPath, 'event');
   if (!event || typeof event !== 'object' || Array.isArray(event))
     throw new Error(`Event JSON at ${eventPath} must be an object`);
@@ -106,7 +124,7 @@ async function main() {
   const decision = decidePrCommand({
     event,
     pullRequest,
-    eventName: process.env.GITHUB_EVENT_NAME || 'issue_comment',
+    eventName: eventName ?? (process.env.GITHUB_EVENT_NAME || 'issue_comment'),
   });
   process.stdout.write(`${JSON.stringify(decision)}\n`);
 }
