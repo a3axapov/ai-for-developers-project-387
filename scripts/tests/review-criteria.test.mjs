@@ -74,6 +74,26 @@ test('REVIEW.md fixes the finding format and comment requirements', async () => 
   );
 });
 
+test('pull request template keeps closing keywords as plain text', async () => {
+  const template = await read('.github/pull_request_template.md');
+
+  assert.doesNotMatch(
+    template,
+    /`[^`\n]*\bCloses\s+#/i,
+    'Closes #N must not be wrapped in inline code: GitHub ignores it there',
+  );
+  assert.match(
+    template,
+    /^- Closes #N\b/m,
+    'missing a plain Closes keyword line',
+  );
+  assert.match(
+    template,
+    /не оформляйте[^\n]*(inline-код|блок кода)|inline-код[^\n]*не закрыва/i,
+    'missing the warning that formatted closing keywords do not close issues',
+  );
+});
+
 test('pull request template requires evidence, risk, rollback and merge decision', async () => {
   const template = await read('.github/pull_request_template.md');
 
