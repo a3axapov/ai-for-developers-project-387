@@ -13,13 +13,17 @@ import {
 
 const PR = 26;
 const SHA = 'a'.repeat(40);
+const WORKFLOW_BOT = 'github-actions[bot]';
 
 function marker(pr, run, sha = SHA) {
   return buildMarker({ pr, run, sha });
 }
 
-function commentsFor(runs, pr = PR) {
-  return runs.map((run) => ({ body: `контекст\n\n${marker(pr, run)}\n` }));
+function commentsFor(runs, pr = PR, author = WORKFLOW_BOT) {
+  return runs.map((run) => ({
+    body: `контекст\n\n${marker(pr, run)}\n`,
+    author,
+  }));
 }
 
 function decide(overrides = {}) {
@@ -54,6 +58,49 @@ test('only markers of the current pull request count', () => {
   const result = decide({ comments: other });
   assert.equal(result.decision, 'allow');
   assert.equal(result.count, 1);
+});
+
+test('markers from untrusted and missing authors are ignored', () => {
+  const forged = [
+    { body: marker(PR, '50.1'), author: 'mallory' },
+    { body: marker(PR, '51.1'), author: 'dependabot[bot]' },
+    { body: marker(PR, '52.1'), author: 'github-actions' },
+    { body: marker(PR, '53.1'), author: 'opencode-agent' },
+    { body: marker(PR, '54.1') },
+    marker(PR, '55.1'),
+    { body: `без автора\n\n${marker(PR, '56.1')}`, author: null },
+  ];
+  const result = decide({ comments: forged });
+  assert.equal(result.decision, 'allow');
+  assert.equal(result.count, 1);
+  assert.equal(result.markers.length, 0);
+});
+
+test('markers from the trusted workflow bot count', () => {
+  for (const author of ['github-actions[bot]', 'opencode-agent[bot]']) {
+    const result = decide({
+      comments: [{ body: marker(PR, '60.1'), author }],
+    });
+    assert.equal(result.decision, 'allow', author);
+    assert.equal(result.count, 2, author);
+    assert.equal(result.markers.length, 1, author);
+  }
+});
+
+test('forged markers cannot exhaust the run limit', () => {
+  const forged = range(1, 10).map((run) => ({
+    body: marker(PR, run),
+    author: 'mallory',
+  }));
+  const result = decide({ comments: forged });
+  assert.equal(result.decision, 'allow');
+  assert.equal(result.count, 1);
+
+  const mixed = [...commentsFor(range(1, 4)), ...forged];
+  assert.equal(decide({ comments: mixed }).count, 5);
+  const denied = decide({ comments: [...commentsFor(range(1, 5)), ...forged] });
+  assert.equal(denied.decision, 'limit-reached');
+  assert.equal(denied.count, 6);
 });
 
 test('a run cancelled before reservation does not consume the limit', () => {
@@ -111,10 +158,11 @@ test('the marker is a hidden comment carrying pull request, run and SHA', () => 
     buildMarker({ pr: PR, run: '1000.1', sha: SHA }),
     `<!-- review-run-limit pr=26 run=1000.1 sha=${SHA} -->`,
   );
-  const [parsed] = parseMarkers([
-    buildMarker({ pr: PR, run: '1000.1', sha: SHA }),
-  ]);
+  const body = buildMarker({ pr: PR, run: '1000.1', sha: SHA });
+  const [parsed] = parseMarkers([{ body, author: WORKFLOW_BOT }]);
   assert.deepEqual(parsed, { pr: PR, run: '1000.1', sha: SHA });
+  assert.deepEqual(parseMarkers([{ body, author: 'mallory' }]), []);
+  assert.deepEqual(parseMarkers([body]), []);
 });
 
 test('an allowed decision carries the reservation marker to publish', () => {
@@ -163,7 +211,7 @@ test('the CLI prints the decision as JSON from a file', async () => {
         pr: PR,
         run: '1000.1',
         sha: SHA,
-        comments: commentsFor(['10.1', '11.1']).map((c) => c.body),
+        comments: commentsFor(['10.1', '11.1']),
       }),
     );
     const result = spawnSync(
@@ -188,13 +236,33 @@ test('the CLI reads stdin when no input file is given', () => {
       pr: PR,
       run: '1000.1',
       sha: SHA,
-      comments: commentsFor(range(1, 5)).map((c) => c.body),
+      comments: commentsFor(range(1, 5)),
     }),
   });
   assert.equal(result.status, 0, result.stderr);
   const decision = JSON.parse(result.stdout);
   assert.equal(decision.decision, 'limit-reached');
   assert.equal(decision.count, 6);
+});
+
+test('the CLI ignores forged markers from untrusted comment authors', () => {
+  const forged = range(1, 10).map((run) => ({
+    body: marker(PR, run),
+    author: 'mallory',
+  }));
+  const result = spawnSync(process.execPath, ['scripts/review-run-limit.mjs'], {
+    encoding: 'utf8',
+    input: JSON.stringify({
+      pr: PR,
+      run: '1000.1',
+      sha: SHA,
+      comments: forged,
+    }),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const decision = JSON.parse(result.stdout);
+  assert.equal(decision.decision, 'allow');
+  assert.equal(decision.count, 1);
 });
 
 test('the CLI exits non-zero only for unusable input', async () => {

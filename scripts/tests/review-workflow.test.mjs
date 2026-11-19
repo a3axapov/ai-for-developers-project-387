@@ -188,6 +188,14 @@ export function assertReviewWorkflow(workflow) {
   assert.match(contextRun, /\.review\/REVIEW\.md/);
   assert.match(contextRun, /\.review\/AGENTS\.md/);
 
+  // REV-3: an absent base criterion file must be recorded as unavailable, not
+  // silently replaced by an empty file that looks checked.
+  assert.match(contextRun, /\.review\/criteria-status\.txt/);
+  assert.match(contextRun, /REVIEW\.md: available/);
+  assert.match(contextRun, /REVIEW\.md: unavailable/);
+  assert.match(contextRun, /AGENTS\.md: available/);
+  assert.match(contextRun, /AGENTS\.md: unavailable/);
+
   // The reviewer must see the PR body, the linked issues/spec and the previous
   // review so it can check scope and reconcile earlier findings.
   assert.match(contextRun, /gh pr view/);
@@ -208,12 +216,18 @@ export function assertReviewWorkflow(workflow) {
   );
   assert.ok(wait, 'pending CI must be recorded explicitly');
   const waitRun = String(wait.run);
-  assert.match(
-    waitRun,
-    /for attempt in \$\(seq 1 15\)/,
-    'CI wait must be bounded',
+  assert.deepEqual(
+    [...waitRun.matchAll(/for attempt in \$\(seq 1 (\d+)\)/g)].map(
+      (match) => match[1],
+    ),
+    ['30'],
+    'CI wait must be bounded by exactly 30 one-minute attempts',
   );
-  assert.match(waitRun, /sleep 60/);
+  assert.equal(
+    [...waitRun.matchAll(/\bsleep 60\b/g)].length,
+    1,
+    'each bounded CI attempt waits one minute',
+  );
   assert.match(waitRun, /check-runs/);
   assert.match(waitRun, /ci-status\.txt/);
   // B1: only the required `check` context is awaited. The commit's check-runs
@@ -241,6 +255,13 @@ export function assertReviewWorkflow(workflow) {
     'comments are the reservation store',
   );
   assert.match(limitRun, /review-run-limit\.mjs/);
+  // REV-2: the marker store must carry the comment author so the limit only
+  // counts trusted bot reservations, not forged markers from any commenter.
+  assert.match(
+    limitRun,
+    /author:\s*\.user\.login/,
+    'the limit input must pass each comment author to the decision module',
+  );
   assert.match(
     limitRun,
     /gh api --method POST/,
@@ -299,14 +320,27 @@ export function assertReviewWorkflow(workflow) {
     'AGENTS.md',
     'CLAUDE.md',
     'CONTEXT.md',
+    'REVIEW.md',
     'opencode.json',
     '.opencode',
+    '.agents',
   ])
     assert.match(
       stageRun,
       new RegExp(`--exclude='\\*?${control.replace('.', '\\.')}'`),
       `the source snapshot must exclude the PR-controlled ${control}`,
     );
+  // Base criteria stay available only through .review/, never via the PR tree.
+  assert.doesNotMatch(
+    stageRun,
+    /--exclude='[^']*\.review/,
+    'the base criteria copied to .review/ must survive the snapshot exclusions',
+  );
+  assert.match(
+    stageRun,
+    /-name REVIEW\.md|-name \.agents/,
+    'the stage step must verify the PR criteria are absent from src/',
+  );
   assert.equal(model.env.OPENCODE_DISABLE_PROJECT_CONFIG, 'true');
   assert.match(
     String(model.run),
@@ -367,6 +401,7 @@ export function assertReviewWorkflow(workflow) {
     '.review/pr.json',
     '.review/issues.json',
     '.review/previous-review.json',
+    '.review/criteria-status.txt',
     'исправлено',
     'обосновано',
     'открыто',
@@ -493,6 +528,31 @@ test('the contract rejects unsafe review workflow variants', async () => {
       wait.run = String(wait.run).replace(
         'select(.name == "check")',
         'select(.name != "")',
+      );
+    },
+    'CI wait shorter than the real check duration': (clone) => {
+      const wait = waitStep(clone);
+      wait.run = String(wait.run).replace('seq 1 30', 'seq 1 15');
+    },
+    'missing criteria availability record': (clone) => {
+      const context = clone.jobs.review.steps.find((step) =>
+        /git diff/.test(String(step.run ?? '')),
+      );
+      context.run = String(context.run)
+        .split('\n')
+        .filter((line) => !/criteria-status/.test(line))
+        .join('\n');
+    },
+    'source snapshot includes PR review criteria': (clone) => {
+      stageStep(clone).run = String(stageStep(clone).run).replace(
+        " --exclude='*REVIEW.md'",
+        '',
+      );
+    },
+    'source snapshot includes PR agent skills': (clone) => {
+      stageStep(clone).run = String(stageStep(clone).run).replace(
+        " --exclude='*.agents'",
+        '',
       );
     },
     'reviewer runs inside the PR checkout': (clone) => {
