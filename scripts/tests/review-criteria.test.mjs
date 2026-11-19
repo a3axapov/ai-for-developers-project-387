@@ -14,6 +14,51 @@ function includes(source, values) {
   }
 }
 
+const closingKeyword = /\b(?:Closes|Fixes)\s+#[0-9A-Za-z]+/i;
+
+function formattedClosingKeywords(markdown) {
+  const violations = [];
+  let inFence = false;
+
+  markdown.split('\n').forEach((line, index) => {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence;
+      return;
+    }
+    if (inFence) {
+      if (closingKeyword.test(line)) {
+        violations.push({ kind: 'fenced', line: index + 1 });
+      }
+      return;
+    }
+    for (const span of line.match(/`[^`]*`/g) ?? []) {
+      if (closingKeyword.test(span)) {
+        violations.push({ kind: 'inline', line: index + 1 });
+        break;
+      }
+    }
+  });
+
+  return violations;
+}
+
+function withoutCode(markdown) {
+  const lines = [];
+  let inFence = false;
+
+  for (const line of markdown.split('\n')) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence) {
+      lines.push(line.replace(/`[^`]*`/g, ''));
+    }
+  }
+
+  return lines.join('\n');
+}
+
 test('REVIEW.md defines review risk by consequence and calendar criteria', async () => {
   const review = await read('REVIEW.md');
 
@@ -71,6 +116,54 @@ test('REVIEW.md fixes the finding format and comment requirements', async () => 
     review,
     /общ\p{L}* комментари/iu,
     'missing general PR comment requirement',
+  );
+});
+
+test('detects plain and formatted closing keywords', () => {
+  assert.deepEqual(
+    formattedClosingKeywords('- Closes #12 — plain text'),
+    [],
+    'plain closing keyword must not be reported',
+  );
+  assert.deepEqual(
+    formattedClosingKeywords('- `Fixes #M` in inline code'),
+    [{ kind: 'inline', line: 1 }],
+    'Fixes #M in inline code must be reported',
+  );
+  assert.deepEqual(
+    formattedClosingKeywords('- `Closes #N` in inline code'),
+    [{ kind: 'inline', line: 1 }],
+    'Closes #N in inline code must be reported',
+  );
+  assert.deepEqual(
+    formattedClosingKeywords('```text\nCloses #N\n```'),
+    [{ kind: 'fenced', line: 2 }],
+    'Closes #N in a fenced block must be reported',
+  );
+  assert.deepEqual(
+    formattedClosingKeywords('```text\nFixes #M\n```'),
+    [{ kind: 'fenced', line: 2 }],
+    'Fixes #M in a fenced block must be reported',
+  );
+});
+
+test('pull request template keeps closing keywords as plain text', async () => {
+  const template = await read('.github/pull_request_template.md');
+
+  assert.deepEqual(
+    formattedClosingKeywords(template),
+    [],
+    'closing keywords must not be wrapped in inline code or hidden in a fenced block: GitHub ignores them there',
+  );
+  assert.match(
+    withoutCode(template),
+    /^- Closes #N\b/m,
+    'missing a plain Closes keyword line',
+  );
+  assert.match(
+    template,
+    /не оформляйте[^\n]*(inline-код|блок кода)|inline-код[^\n]*не закрыва/i,
+    'missing the warning that formatted closing keywords do not close issues',
   );
 });
 
