@@ -1,0 +1,110 @@
+name: Lighthouse Audit
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # 00:00 UTC / 03:00 МСК
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Реальный аудит (live) или учебный отчёт (demo)'
+        type: choice
+        options: [live, demo]
+        default: live
+
+permissions: {}
+
+concurrency:
+  group: lighthouse-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: read
+    env:
+      APP_URL: ${{ vars.APP_URL }}
+      AUDIT_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'live' }}
+    outputs:
+      result: ${{ steps.agent.outputs.result }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Collect report
+        id: collect
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/lighthouse-report.json"
+          if [[ "$AUDIT_MODE" == demo ]]; then
+            node scripts/lighthouse-audit.mjs demo > "$report"
+          else
+            target="$(node scripts/lighthouse-audit.mjs target)"
+            # Wake an idle Render service before measuring the page.
+            curl --fail --silent --show-error --location --max-time 90 --retry 2 \
+              --retry-max-time 150 --output /dev/null "$target"
+            CHROME_PATH="$(command -v google-chrome)" \
+              npx --yes lighthouse@12.8.2 "$target" --chrome-flags=--headless \
+              --only-categories=performance --output=json --output-path="$report"
+          fi
+
+      - name: Upload source report
+        if: ${{ !cancelled() && steps.collect.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lighthouse-report
+          path: ${{ runner.temp }}/lighthouse-report.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Install OpenCode
+        run: |
+          curl -fsSL https://opencode.ai/install | bash -s -- --version 1.19.6 --no-modify-path
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: Analyze report with OpenCode
+        id: agent
+        timeout-minutes: 8
+        shell: bash
+        env:
+          MODEL: opencode/deepseek-v4.1-flash
+          VARIANT: low
+          SHARE: 'false'
+          USE_GITHUB_TOKEN: 'true'
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_DISABLE_PROJECT_CONFIG: 'true'
+          OPENCODE_CONFIG_CONTENT: '{"permission":"deny","share":"disabled"}'
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/lighthouse-report.json"
+          log="$RUNNER_TEMP/lighthouse-agent.log"
+          PROMPT="$(node scripts/lighthouse-audit.mjs prompt "$AUDIT_MODE" "$report")" \
+            opencode github run | tee "$log"
+          node scripts/lighthouse-audit.mjs decision "$AUDIT_MODE" "$report" "$log"
+
+  publish:
+    needs: audit
+    if: needs.audit.outputs.result != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Publish agent finding or journal result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUDIT_RESULT: ${{ needs.audit.outputs.result }}
+          LIGHTHOUSE_JOURNAL_ISSUE: ${{ vars.LIGHTHOUSE_JOURNAL_ISSUE }}
+        run: node scripts/lighthouse-audit.mjs publish
