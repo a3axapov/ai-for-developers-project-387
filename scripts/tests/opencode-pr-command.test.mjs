@@ -46,6 +46,20 @@ function decide(overrides = {}) {
   });
 }
 
+function environmentWithout(...names) {
+  const env = { ...process.env };
+  for (const name of names) delete env[name];
+  return env;
+}
+
+async function writeGateFixture(directory, prOverrides = {}) {
+  const eventPath = join(directory, 'event.json');
+  const prPath = join(directory, 'pr.json');
+  await writeFile(eventPath, JSON.stringify(event()));
+  await writeFile(prPath, JSON.stringify(pullRequest(prOverrides)));
+  return { eventPath, prPath };
+}
+
 test('trusted authors in a same-repository pull request are allowed', () => {
   assert.deepEqual(TRUSTED_ASSOCIATIONS, ['OWNER', 'MEMBER', 'COLLABORATOR']);
   for (const association of TRUSTED_ASSOCIATIONS) {
@@ -151,19 +165,66 @@ test('a missing pull request payload is denied', () => {
 test('gate CLI prints the decision and exits zero for denied input', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'pr-gate-'));
   try {
-    const eventPath = join(directory, 'event.json');
-    const prPath = join(directory, 'pr.json');
-    await writeFile(eventPath, JSON.stringify(event()));
-    await writeFile(
-      prPath,
-      JSON.stringify(
-        pullRequest({ headRepository: { nameWithOwner: 'fork/app' } }),
-      ),
-    );
+    const { eventPath, prPath } = await writeGateFixture(directory, {
+      headRepository: { nameWithOwner: 'fork/app' },
+    });
     const result = spawnSync(
       process.execPath,
       ['scripts/pr-command-gate.mjs', '--event', eventPath, '--pr', prPath],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', env: environmentWithout('GITHUB_EVENT_NAME') },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      allowed: false,
+      reasons: ['pull-request:fork'],
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('gate CLI obeys --event-name over an unrelated GITHUB_EVENT_NAME', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'pr-gate-'));
+  try {
+    const { eventPath, prPath } = await writeGateFixture(directory, {
+      headRepository: { nameWithOwner: 'fork/app' },
+    });
+    const result = spawnSync(
+      process.execPath,
+      [
+        'scripts/pr-command-gate.mjs',
+        '--event',
+        eventPath,
+        '--pr',
+        prPath,
+        '--event-name',
+        'issue_comment',
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, GITHUB_EVENT_NAME: 'pull_request' },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      allowed: false,
+      reasons: ['pull-request:fork'],
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('gate CLI defaults to issue_comment when GITHUB_EVENT_NAME is unset', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'pr-gate-'));
+  try {
+    const { eventPath, prPath } = await writeGateFixture(directory, {
+      headRepository: { nameWithOwner: 'fork/app' },
+    });
+    const result = spawnSync(
+      process.execPath,
+      ['scripts/pr-command-gate.mjs', '--event', eventPath, '--pr', prPath],
+      { encoding: 'utf8', env: environmentWithout('GITHUB_EVENT_NAME') },
     );
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), {
@@ -185,11 +246,13 @@ test('gate CLI exits non-zero for unusable input', async () => {
       ['--event', eventPath],
       ['--event', join(directory, 'missing.json'), '--pr', eventPath],
       ['--event', eventPath, '--pr', eventPath],
+      ['--event', eventPath, '--pr', eventPath, '--event-name'],
+      ['--event', eventPath, '--pr', eventPath, '--event-name', 'pull_request'],
     ]) {
       const result = spawnSync(
         process.execPath,
         ['scripts/pr-command-gate.mjs', ...args],
-        { encoding: 'utf8' },
+        { encoding: 'utf8', env: environmentWithout('GITHUB_EVENT_NAME') },
       );
       assert.notEqual(result.status, 0, args.join(' '));
       assert.match(result.stderr, /\S/);
