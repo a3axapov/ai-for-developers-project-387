@@ -14,6 +14,14 @@ const MARKER =
   /<!--\s*review-run-limit\s+pr=(\d+)\s+run=([^\s]+)\s+sha=([0-9a-fA-F]{7,64})\s*-->/g;
 const SAFE_RUN = /^[A-Za-z0-9._-]+$/;
 
+// Only the workflow's own bot identities may reserve attempts. Any commenter
+// can post a well-formed marker, so counting every body would let an external
+// user forge hidden markers and burn the limit (DoS on auto-review).
+export const TRUSTED_AUTHORS = Object.freeze([
+  'github-actions[bot]',
+  'opencode-agent[bot]',
+]);
+
 export function buildMarker({ pr, run, sha }) {
   if (!Number.isInteger(pr) || pr <= 0)
     throw new TypeError('pr must be a positive integer');
@@ -25,14 +33,24 @@ export function buildMarker({ pr, run, sha }) {
 }
 
 function commentBody(comment) {
-  if (typeof comment === 'string') return comment;
   if (comment && typeof comment === 'object') return comment.body;
   return undefined;
+}
+
+function isTrustedAuthor(comment) {
+  return (
+    comment !== null &&
+    typeof comment === 'object' &&
+    TRUSTED_AUTHORS.includes(comment.author)
+  );
 }
 
 export function parseMarkers(comments) {
   const markers = [];
   for (const comment of comments) {
+    // Markers from users, other bots and comments without an author are
+    // untrusted and never consume the limit.
+    if (!isTrustedAuthor(comment)) continue;
     const body = commentBody(comment);
     if (typeof body !== 'string') continue;
     for (const match of body.matchAll(MARKER)) {
