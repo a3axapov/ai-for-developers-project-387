@@ -919,13 +919,31 @@ merge, а воркфлоу на `issue_comment` запускаются искл�
   доверенных авторов — `OWNER`, `MEMBER`, `COLLABORATOR` и `opencode-agent[bot]`.
   Остальные боты (dependabot, github-actions, release-please) и PR из fork
   уходят в ручное ревью и намеренно не получают статус-комментарий.
-- Checkout: точный `head.sha`, а не merge-ref. `REVIEW.md` и `AGENTS.md`
-  читаются из базовой ветки, поэтому PR не может подменить критерии ревью.
-- Авторизация: `GITHUB_TOKEN` (`USE_GITHUB_TOKEN: "true"`), без `id-token`.
-  Права задания: `contents: read`, `pull-requests: write`, `issues: write`,
-  `actions: read`, `checks: read`, `statuses: read`.
-- Таймауты: 75 минут у job и 60 минут у шага модели. `concurrency`
-  по номеру PR отменяет устаревшее ревью, когда приходит новый push.
+- Checkout: точный `head.sha`, а не merge-ref. Checkout нужен только чтобы
+  построить diff и контекст. Модель запускается в отдельном каталоге
+  `$RUNNER_TEMP/review` с `OPENCODE_DISABLE_PROJECT_CONFIG=true`: там лежат
+  `.review/` и снимок исходников `src/`, но нет `AGENTS.md`, `CLAUDE.md`,
+  `CONTEXT.md`, `opencode.json` и `.opencode/` из PR. `REVIEW.md` и `AGENTS.md`
+  читаются из базовой ветки в `.review/`, поэтому PR не может подменить
+  критерии ревью или подсунуть свои плагины.
+- Контекст: `.review/pr.json` (тело PR, автор, ветки, связанные issues),
+  `.review/issues.json` (до 10 связанных тикетов и спецификация по ссылкам `#N`
+  и `closingIssuesReferences`), `.review/previous-review.json` (прошлые ревью и
+  комментарии). Модель сверяет объём со спецификацией и помечает каждое прошлое
+  замечание `исправлено`, `обосновано` или `открыто` для нового SHA; весь этот
+  текст считается недоверенными данными.
+- CI: ожидание до 15 минут только обязательной проверки `check` для head-SHA.
+  Собственный запуск ревью и отменённые прошлые запуски не учитываются. Если
+  `check` не завершился, фиксируется `CI pending` без вывода о падении; когда
+  завершился — берётся его `conclusion`.
+- Авторизация: `GITHUB_TOKEN` (`USE_GITHUB_TOKEN: "true"` — значение контракта,
+  `opencode run` его не читает), без `id-token`. Весь GitHub I/O выполняет `gh`
+  с токеном job; модель не авторизована в GitHub. Права задания:
+  `contents: read`, `pull-requests: write`, `issues: write`, `actions: read`,
+  `checks: read`, `statuses: read`.
+- Таймауты: 75 минут у job, 60 минут у шага модели и 10 минут у публикации;
+  ожидание CI входит в бюджет job. `concurrency` по номеру PR отменяет
+  устаревшее ревью, когда приходит новый push.
 - Результат: общий комментарий и inline-комментарии к строкам diff.
   Публикуется только `COMMENT`, без `APPROVE` и `REQUEST_CHANGES`.
 - Статусы видны комментариями в PR, а не commit status: `reviewed@<sha>` —
