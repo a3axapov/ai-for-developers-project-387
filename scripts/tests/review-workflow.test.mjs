@@ -290,7 +290,11 @@ export function assertReviewWorkflow(workflow) {
   const stageRun = String(stage.run);
   assert.match(stageRun, /\$RUNNER_TEMP\/review/);
   assert.match(stageRun, /git archive/);
-  assert.match(stageRun, /cp -R \.review/);
+  assert.match(
+    stageRun,
+    /cp -R \.review "\$(?:RUNNER_TEMP\/review|review_root)\/\.review"/,
+    'base-branch .review/ criteria must be copied into the isolated workspace',
+  );
   for (const control of [
     'AGENTS.md',
     'CLAUDE.md',
