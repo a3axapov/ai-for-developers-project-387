@@ -42,6 +42,21 @@ function statusSteps(workflow) {
   );
 }
 
+function waitStep(workflow) {
+  return findStep(
+    workflow,
+    (step) =>
+      /CI pending/.test(String(step.run ?? '')) &&
+      /check-runs/.test(String(step.run ?? '')),
+  );
+}
+
+function stageStep(workflow) {
+  return findStep(workflow, (step) =>
+    /git archive/.test(String(step.run ?? '')),
+  );
+}
+
 function reviewerConfig(step) {
   return JSON.parse(step.env.OPENCODE_CONFIG_CONTENT);
 }
@@ -85,6 +100,13 @@ export function assertReviewWorkflow(workflow) {
     'edited events must require a body change',
   );
   assert.match(String(job.if), /github\.event\.changes\.body != null/);
+  // The two conditions are only safe together: an `edited` event without a
+  // body change must short-circuit before the body check is evaluated.
+  assert.match(
+    String(job.if),
+    /github\.event\.action != 'edited'\s*\|\|\s*github\.event\.changes\.body != null/,
+    'edited events must be guarded by the body-change condition in one expression',
+  );
   const allowedBots = [
     ...String(job.if).matchAll(/user\.login == '([^']+)'/g),
   ].map((match) => match[1]);
@@ -166,6 +188,21 @@ export function assertReviewWorkflow(workflow) {
   assert.match(contextRun, /\.review\/REVIEW\.md/);
   assert.match(contextRun, /\.review\/AGENTS\.md/);
 
+  // The reviewer must see the PR body, the linked issues/spec and the previous
+  // review so it can check scope and reconcile earlier findings.
+  assert.match(contextRun, /gh pr view/);
+  assert.match(contextRun, /\.review\/pr\.json/);
+  assert.match(contextRun, /repos\/\$GITHUB_REPOSITORY\/issues\/\$issue/);
+  assert.match(contextRun, /\.review\/issues\.json/);
+  assert.match(contextRun, /pulls\/\$PR\/reviews/);
+  assert.match(contextRun, /pulls\/\$PR\/comments/);
+  assert.match(contextRun, /\.review\/previous-review\.json/);
+  assert.match(
+    contextRun,
+    /head -[n ]?10/,
+    'the linked issue set must stay bounded',
+  );
+
   const wait = job.steps.find((step) =>
     /CI pending/.test(String(step.run ?? '')),
   );
@@ -173,12 +210,26 @@ export function assertReviewWorkflow(workflow) {
   const waitRun = String(wait.run);
   assert.match(
     waitRun,
-    /for attempt in \$\(seq 1 10\)/,
+    /for attempt in \$\(seq 1 15\)/,
     'CI wait must be bounded',
   );
   assert.match(waitRun, /sleep 60/);
   assert.match(waitRun, /check-runs/);
   assert.match(waitRun, /ci-status\.txt/);
+  // B1: only the required `check` context is awaited. The commit's check-runs
+  // also contain this workflow's own in-progress `review` run and cancelled
+  // predecessor runs, so waiting on all of them can never observe completed CI.
+  assert.match(
+    waitRun,
+    /select\(\.name == "check"\)/,
+    'the wait must select only the required check context',
+  );
+  assert.doesNotMatch(
+    waitRun,
+    /all\(\.check_runs\[\]; \.status == "completed"\)/,
+    'the wait must not require every check run on the commit to be completed',
+  );
+  assert.match(waitRun, /checks-required\.json/);
 
   const limit = limitStep(workflow);
   assert.ok(limit, 'the run limit must be checked');
@@ -206,7 +257,7 @@ export function assertReviewWorkflow(workflow) {
 
   const model = modelStep(workflow);
   assert.ok(model, 'the reviewer model must run with opencode run');
-  assert.match(String(model.run), /opencode run --model "\$MODEL"/);
+  assert.match(String(model.run), /opencode run[^\n]* --model "\$MODEL"/);
   assert.match(String(model.run), /--variant "\$VARIANT"/);
   assert.match(String(model.run), /--agent reviewer/);
   assert.match(String(model.run), /--format json/);
@@ -226,6 +277,39 @@ export function assertReviewWorkflow(workflow) {
   assert.equal(model.env.VARIANT, 'low');
   assert.equal(model.env.SHARE, 'false');
   assert.equal(model.env.OPENCODE_API_KEY, '${{ secrets.OPENCODE_API_KEY }}');
+
+  // B2: the model runs in an isolated directory outside the PR checkout, with
+  // project config disabled. The snapshot must not carry PR-controlled
+  // instruction/config/plugin files, while base-branch criteria stay in
+  // .review/.
+  const stage = stageStep(workflow);
+  assert.ok(
+    stage,
+    'a step must stage an isolated review workspace outside the checkout',
+  );
+  const stageRun = String(stage.run);
+  assert.match(stageRun, /\$RUNNER_TEMP\/review/);
+  assert.match(stageRun, /git archive/);
+  assert.match(stageRun, /cp -R \.review/);
+  for (const control of [
+    'AGENTS.md',
+    'CLAUDE.md',
+    'CONTEXT.md',
+    'opencode.json',
+    '.opencode',
+  ])
+    assert.match(
+      stageRun,
+      new RegExp(`--exclude='\\*?${control.replace('.', '\\.')}'`),
+      `the source snapshot must exclude the PR-controlled ${control}`,
+    );
+  assert.equal(model.env.OPENCODE_DISABLE_PROJECT_CONFIG, 'true');
+  assert.match(
+    String(model.run),
+    /opencode run --dir "\$RUNNER_TEMP\/review"/,
+    'the reviewer must run in the isolated directory, not the PR checkout',
+  );
+  assert.match(String(model.run), /--format json/);
 
   const limitIndex = job.steps.indexOf(limit);
   const modelIndex = job.steps.indexOf(model);
@@ -276,6 +360,15 @@ export function assertReviewWorkflow(workflow) {
     'не запускай',
     'COMMENT',
     'APPROVE',
+    '.review/pr.json',
+    '.review/issues.json',
+    '.review/previous-review.json',
+    'исправлено',
+    'обосновано',
+    'открыто',
+    'не повторяй',
+    'недоступн',
+    'недоверенн',
   ])
     assert.ok(
       prompt.includes(requirement),
@@ -310,6 +403,10 @@ export function assertReviewWorkflow(workflow) {
   assert.match(publishRun, /--current-head/);
   assert.match(publishRun, /--post/);
   assert.match(publishRun, /pulls\/\$PR/);
+  // A superseded head exits 3 from the publisher; that is not an error and
+  // must not post the failure status comment.
+  assert.match(publishRun, /-eq 3/);
+  assert.match(publishRun, /superseded/i);
   assert.equal(publish.if, "steps.limit.outputs.decision == 'allow'");
 
   for (const run of allRuns(workflow)) {
@@ -386,6 +483,33 @@ test('the contract rejects unsafe review workflow variants', async () => {
     'no inline publish': (clone) => {
       publishStep(clone).run =
         'gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body=x';
+    },
+    'CI wait counts every check run': (clone) => {
+      const wait = waitStep(clone);
+      wait.run = String(wait.run).replace(
+        'select(.name == "check")',
+        'select(.name != "")',
+      );
+    },
+    'reviewer runs inside the PR checkout': (clone) => {
+      modelStep(clone).run =
+        'opencode run --model "$MODEL" --format json "$PROMPT" > .review/out.jsonl';
+    },
+    'reviewer loads project config': (clone) => {
+      delete modelStep(clone).env.OPENCODE_DISABLE_PROJECT_CONFIG;
+    },
+    'review workspace copies the PR tree': (clone) => {
+      stageStep(clone).run =
+        'rm -rf "$RUNNER_TEMP/review"; cp -R . "$RUNNER_TEMP/review"';
+    },
+    'missing PR and issue context': (clone) => {
+      const context = clone.jobs.review.steps.find((step) =>
+        /git diff/.test(String(step.run ?? '')),
+      );
+      context.run = String(context.run)
+        .split('\n')
+        .filter((line) => !/gh pr view|issues\/\$issue/.test(line))
+        .join('\n');
     },
     'skipped used as a status': (clone) => {
       statusSteps(clone)[0].run = `${statusSteps(clone)[0].run}\necho skipped`;
