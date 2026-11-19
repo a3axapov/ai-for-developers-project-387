@@ -7,8 +7,10 @@ import { join } from 'node:path';
 import {
   buildAnchorlessRetry,
   buildIssueComment,
+  buildPostRequest,
   buildReviewPayload,
   parseAnchors,
+  publish,
 } from '../publish-review.mjs';
 
 const HEAD = 'b'.repeat(40);
@@ -214,6 +216,124 @@ test('diff content that looks like a file header stays content', () => {
   assert.deepEqual([...anchors.keys()], ['notes.txt']);
   assert.deepEqual([...anchors.get('notes.txt').right], [2, 3]);
   assert.deepEqual([...anchors.get('notes.txt').left], [5, 6]);
+});
+
+test('quoted diff paths keep their inline anchors', () => {
+  const anchors =
+    parseAnchors(`diff --git "a/dir/file with space.txt" "b/dir/file with space.txt"
+--- "a/dir/file with space.txt"
++++ "b/dir/file with space.txt"
+@@ -0,0 +1,2 @@
++one
++two
+diff --git "a/caf\\303\\251.md" "b/caf\\303\\251.md"
+--- "a/caf\\303\\251.md"
++++ "b/caf\\303\\251.md"
+@@ -0,0 +1 @@
++new
+`);
+  assert.deepEqual([...anchors.get('dir/file with space.txt').right], [1, 2]);
+  assert.deepEqual([...anchors.get('café.md').right], [1]);
+});
+
+test('the publish path retries without anchors, then falls back to a comment', async () => {
+  const { payload } = build();
+
+  const success = await publish(
+    { payload },
+    { repository: 'acme/app', pr: 26, post: () => ({ status: 0 }) },
+  );
+  assert.equal(success, 'review');
+
+  const calls = [];
+  const responses = [
+    { status: 1, stderr: 'gh: Validation Failed (HTTP 422)' },
+    { status: 0 },
+  ];
+  const retry = await publish(
+    { payload },
+    {
+      repository: 'acme/app',
+      pr: 26,
+      post: (endpoint, body, repository) => {
+        calls.push({ endpoint, body, repository });
+        return responses.shift();
+      },
+    },
+  );
+  assert.equal(retry, 'review-without-anchors');
+  assert.equal(calls[0].endpoint, 'pulls/26/reviews');
+  assert.equal(calls[0].repository, 'acme/app');
+  assert.equal(calls[1].endpoint, 'pulls/26/reviews');
+  assert.deepEqual(calls[1].body.comments, []);
+  assert.equal(calls[1].body.commit_id, HEAD);
+  assert.match(
+    calls[1].body.body,
+    /REV-1: добавленная строка не проверяется\./,
+  );
+
+  const fallbackCalls = [];
+  const fallbackResponses = [
+    { status: 1, stderr: 'Validation Failed (422)' },
+    { status: 1, stderr: 'Validation Failed (422)' },
+    { status: 0 },
+  ];
+  const fallback = await publish(
+    { payload },
+    {
+      repository: 'acme/app',
+      pr: 26,
+      post: (endpoint, body) => {
+        fallbackCalls.push({ endpoint, body });
+        return fallbackResponses.shift();
+      },
+    },
+  );
+  assert.equal(fallback, 'issue-comment');
+  assert.equal(fallbackCalls[2].endpoint, 'issues/26/comments');
+  assert.deepEqual(Object.keys(fallbackCalls[2].body), ['body']);
+  assert.match(fallbackCalls[2].body.body, /REV-1/);
+  assert.match(fallbackCalls[2].body.body, /reviewed@/);
+});
+
+test('a non-422 publishing error is not retried or downgraded', async () => {
+  const { payload } = build();
+  let calls = 0;
+  await assert.rejects(
+    publish(
+      { payload },
+      {
+        repository: 'acme/app',
+        pr: 26,
+        post: () => {
+          calls += 1;
+          return {
+            status: 1,
+            stderr: 'gh: Resource not accessible (HTTP 403)',
+          };
+        },
+      },
+    ),
+    /Cannot publish review/,
+  );
+  assert.equal(calls, 1);
+});
+
+test('--post builds the exact gh api invocation for the review endpoint', () => {
+  const request = buildPostRequest(
+    'pulls/26/reviews',
+    { event: 'COMMENT', body: 'x' },
+    'acme/app',
+  );
+  assert.deepEqual(request.args, [
+    'api',
+    '--method',
+    'POST',
+    'repos/acme/app/pulls/26/reviews',
+    '--input',
+    '-',
+  ]);
+  assert.deepEqual(JSON.parse(request.input), { event: 'COMMENT', body: 'x' });
 });
 
 test('a deleted file has no RIGHT anchors', () => {

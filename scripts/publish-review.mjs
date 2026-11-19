@@ -12,6 +12,65 @@ function stripDiffPrefix(path) {
   return path.startsWith('a/') || path.startsWith('b/') ? path.slice(2) : path;
 }
 
+// git C-quotes paths that contain spaces, quotes, backslashes or non-ASCII
+// bytes: `--- "a/dir/file with space.txt"`. Undo that before comparing the
+// header with a comment path.
+function unquotePath(value) {
+  if (!(value.startsWith('"') && value.endsWith('"')) || value.length < 2)
+    return value;
+  const body = value.slice(1, -1);
+  const escapes = {
+    n: '\n',
+    t: '\t',
+    r: '\r',
+    '"': '"',
+    '\\': '\\',
+    a: '\x07',
+    b: '\b',
+    f: '\f',
+    v: '\v',
+  };
+  let result = '';
+  const bytes = [];
+  const flush = () => {
+    if (!bytes.length) return;
+    result += new TextDecoder().decode(Uint8Array.from(bytes));
+    bytes.length = 0;
+  };
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index];
+    if (character !== '\\') {
+      flush();
+      result += character;
+      continue;
+    }
+    const next = body[index + 1];
+    if (next === undefined) break;
+    if (Object.hasOwn(escapes, next)) {
+      flush();
+      result += escapes[next];
+      index += 1;
+      continue;
+    }
+    if (/[0-7]/.test(next)) {
+      let octal = next;
+      while (
+        octal.length < 3 &&
+        /[0-7]/.test(body[index + 1 + octal.length] ?? '')
+      )
+        octal += body[index + 1 + octal.length];
+      bytes.push(parseInt(octal, 8));
+      index += octal.length;
+      continue;
+    }
+    flush();
+    result += next;
+    index += 1;
+  }
+  flush();
+  return result;
+}
+
 export function parseAnchors(diff) {
   const anchors = new Map();
   let inHeader = false;
@@ -37,13 +96,13 @@ export function parseAnchors(diff) {
       continue;
     }
     if (inHeader && line.startsWith('--- ')) {
-      const value = line.slice(4).trim();
+      const value = unquotePath(line.slice(4).trim());
       oldPath = value === '/dev/null' ? undefined : stripDiffPrefix(value);
       path = undefined;
       continue;
     }
     if (inHeader && line.startsWith('+++ ')) {
-      const value = line.slice(4).trim();
+      const value = unquotePath(line.slice(4).trim());
       path = value === '/dev/null' ? oldPath : stripDiffPrefix(value);
       if (path !== undefined) ensure(path);
       continue;
@@ -243,9 +302,9 @@ function gh(args, input) {
   return spawnSync('gh', args, { encoding: 'utf8', input });
 }
 
-function post(endpoint, payload, repository) {
-  return gh(
-    [
+export function buildPostRequest(endpoint, payload, repository) {
+  return {
+    args: [
       'api',
       '--method',
       'POST',
@@ -253,21 +312,30 @@ function post(endpoint, payload, repository) {
       '--input',
       '-',
     ],
-    JSON.stringify(payload),
-  );
+    input: JSON.stringify(payload),
+  };
 }
 
-async function publish(result, { repository, pr }) {
+function post(endpoint, payload, repository) {
+  const request = buildPostRequest(endpoint, payload, repository);
+  return gh(request.args, request.input);
+}
+
+export async function publish(result, { repository, pr, post: poster = post }) {
   const reviewPath = `pulls/${pr}/reviews`;
-  let response = post(reviewPath, result.payload, repository);
+  let response = poster(reviewPath, result.payload, repository);
   if (response.status === 0) return 'review';
   const rejected = /422|Validation Failed/.test(
     `${response.stderr ?? ''}${response.stdout ?? ''}`,
   );
   if (!rejected) throw new Error(`Cannot publish review: ${response.stderr}`);
-  response = post(reviewPath, buildAnchorlessRetry(result.payload), repository);
+  response = poster(
+    reviewPath,
+    buildAnchorlessRetry(result.payload),
+    repository,
+  );
   if (response.status === 0) return 'review-without-anchors';
-  response = post(
+  response = poster(
     `issues/${pr}/comments`,
     buildIssueComment(result.payload),
     repository,
