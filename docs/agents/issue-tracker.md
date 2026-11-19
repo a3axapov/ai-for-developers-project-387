@@ -34,6 +34,10 @@ Commands below use `gh` as shorthand for the mise invocation above.
 
 **PRs as a request surface: no.**
 
+`/oc` or `/opencode` in a pull-request comment is a maintenance command for that
+PR (`docs/agents/pr-command.md`), not a request surface and not triage. It does
+not accept new requests, does not create issues, and does not change this rule.
+
 ## Skill instructions
 
 When a skill says "publish to the issue tracker", create a GitHub issue.
