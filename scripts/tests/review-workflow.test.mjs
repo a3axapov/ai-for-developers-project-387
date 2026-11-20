@@ -400,6 +400,7 @@ export function assertReviewWorkflow(workflow) {
     'APPROVE',
     '.review/pr.json',
     '.review/issues.json',
+    '.review/approval.json',
     '.review/previous-review.json',
     '.review/criteria-status.txt',
     'исправлено',

@@ -367,6 +367,11 @@ export function assertPrCommandWorkflow(workflow) {
 
   const reservation = job.steps.find((step) => step.id === 'reservation');
   assert.match(reservation.run, /node scripts\/pr-command-limit\.mjs/);
+  assert.match(workflow['run-name'], /opencode PR #/);
+  const receipt = job.steps.find(
+    (step) => step.name === 'Record admitted PR command',
+  );
+  assert.equal(receipt.if, "steps.reservation.outputs.decision == 'allow'");
   const checkouts = job.steps.filter((step) =>
     String(step.uses ?? '').includes('actions/checkout'),
   );
@@ -379,6 +384,8 @@ export function assertPrCommandWorkflow(workflow) {
   assert.equal(checkout.if, "steps.reservation.outputs.decision == 'allow'");
   assert.ok(job.steps.indexOf(checkouts[0]) < job.steps.indexOf(reservation));
   assert.ok(job.steps.indexOf(reservation) < job.steps.indexOf(checkout));
+  assert.ok(job.steps.indexOf(reservation) < job.steps.indexOf(receipt));
+  assert.ok(job.steps.indexOf(receipt) < job.steps.indexOf(checkout));
   assert.equal(checkout.with['fetch-depth'], 0);
   assert.equal(checkout.with['persist-credentials'], false);
 
@@ -399,12 +406,13 @@ export function assertPrCommandWorkflow(workflow) {
     'the PR job must record the base SHA',
   );
 
-  const agent = job.steps.find(
-    (step) => String(step.run ?? '').trim() === 'opencode github run',
-  );
+  const agent = job.steps.find((step) => step.name === 'Run opencode');
   assert.ok(agent, 'the agent step must run opencode github run');
+  assert.match(agent.run, /timeout --kill-after=30s 60m opencode github run/);
+  for (const reason of ['timeout', 'infra', 'agent_failed'])
+    assert.ok(agent.run.includes(`result=${reason}`));
   assert.equal(agent.if, "steps.reservation.outputs.decision == 'allow'");
-  assert.equal(agent['timeout-minutes'], 60);
+  assert.ok(agent['timeout-minutes'] > 61);
   assert.equal(agent.env.SHARE, 'false');
   assert.equal(agent.env.MENTIONS, '/opencode,/oc');
   assert.equal(agent.env.MODEL, 'opencode/deepseek-v4.1-flash');
@@ -414,6 +422,16 @@ export function assertPrCommandWorkflow(workflow) {
   assert.equal(config.permission.doom_loop, 'deny');
 
   assert.equal(job.permissions['id-token'], 'write');
+  const reporter = workflow.jobs['report-pr-command'];
+  assert.deepEqual(reporter.needs, ['gate', PR_JOB]);
+  assert.match(reporter.if, /limit_exhausted/);
+  assert.match(reporter.steps[0].run, /Нужен человек/);
+  assert.match(reporter.steps[0].run, /Head SHA/);
+  assert.match(reporter.steps[0].env.RUN_URL, /github\.run_attempt/);
+  assert.doesNotMatch(
+    JSON.stringify(reporter),
+    /secrets\.|id-token|opencode github run/,
+  );
   assertNoMainPush(job);
 }
 
@@ -444,7 +462,7 @@ test('the contract rejects unsafe workflow variants', async () => {
     },
     'agent step without the instruction file': (clone) => {
       const agent = clone.jobs[PR_JOB].steps.find(
-        (step) => String(step.run ?? '').trim() === 'opencode github run',
+        (step) => step.name === 'Run opencode',
       );
       agent.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
         permission: { external_directory: 'deny', doom_loop: 'deny' },
