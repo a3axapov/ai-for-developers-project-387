@@ -1,4 +1,8 @@
 name: opencode
+run-name: >-
+  ${{ (github.event.pull_request.number || github.event.issue.pull_request.url)
+  && format('opencode PR #{0}', github.event.pull_request.number || github.event.issue.number)
+  || format('opencode issue #{0}', github.event.issue.number) }}
 
 on:
   issue_comment:
@@ -17,7 +21,7 @@ jobs:
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
       (contains(github.event.comment.body, '/opencode') || contains(github.event.comment.body, '/oc'))
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: ${{ contains(github.event.comment.body, 'implement-spec') && 180 || 60 }}
     concurrency:
       group: opencode-issue-${{ github.event.issue.number }}
       cancel-in-progress: false
@@ -36,13 +40,18 @@ jobs:
         with:
           version: 2026.11.6
 
+      - name: Install Chromium for implement-spec
+        if: contains(github.event.comment.body, 'implement-spec')
+        timeout-minutes: 10
+        run: mise run test:browser:install
+
       - name: Install opencode
         run: |
           curl -fsSL https://opencode.ai/install | bash -s -- --version 1.19.6 --no-modify-path
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 
       - name: Run opencode
-        timeout-minutes: 15
+        timeout-minutes: ${{ contains(github.event.comment.body, 'implement-spec') && 165 || 15 }}
         env:
           MODEL: opencode/deepseek-v4.1-flash
           VARIANT: low
@@ -103,6 +112,10 @@ jobs:
     if: needs.gate.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    outputs:
+      decision: ${{ steps.reservation.outputs.decision }}
+      sha: ${{ steps.reservation.outputs.sha }}
+      model_result: ${{ steps.model.outputs.result }}
     concurrency:
       group: opencode-pr-${{ github.event.pull_request.number || github.event.issue.number }}
       cancel-in-progress: false
@@ -124,9 +137,14 @@ jobs:
 
       - name: Reserve a PR command attempt
         id: reservation
+        timeout-minutes: 10
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/pr-command-limit.mjs
+
+      - name: Record admitted PR command
+        if: steps.reservation.outputs.decision == 'allow'
+        run: echo "Admitted for this Actions run attempt"
 
       - name: Checkout pull request head
         if: steps.reservation.outputs.decision == 'allow'
@@ -139,6 +157,7 @@ jobs:
       - name: Fetch the base branch and record its SHA
         id: base
         if: steps.reservation.outputs.decision == 'allow'
+        timeout-minutes: 5
         env:
           BASE_REF: ${{ steps.reservation.outputs.base_ref }}
         run: |
@@ -152,18 +171,21 @@ jobs:
 
       - name: Install project tools
         if: steps.reservation.outputs.decision == 'allow'
+        timeout-minutes: 10
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           version: 2026.11.6
 
       - name: Install opencode
         if: steps.reservation.outputs.decision == 'allow'
+        timeout-minutes: 5
         run: |
           curl -fsSL https://opencode.ai/install | bash -s -- --version 1.19.6 --no-modify-path
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 
       - name: Check the PR is still open at the reserved head
         if: steps.reservation.outputs.decision == 'allow'
+        timeout-minutes: 3
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number || github.event.issue.number }}
@@ -177,8 +199,9 @@ jobs:
           fi
 
       - name: Run opencode
+        id: model
         if: steps.reservation.outputs.decision == 'allow'
-        timeout-minutes: 60
+        timeout-minutes: 63
         env:
           MODEL: opencode/deepseek-v4.1-flash
           VARIANT: low
@@ -196,4 +219,56 @@ jobs:
                 "doom_loop": "deny"
               }
             }
-        run: opencode github run
+        run: |
+          set -uo pipefail
+          if [[ -z "$OPENCODE_API_KEY" ]] || ! command -v opencode >/dev/null; then
+            echo 'result=infra' >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          timeout --kill-after=30s 60m opencode github run
+          code=$?
+          case "$code" in
+            0) result=success ;;
+            124|137) result=timeout ;;
+            125|126|127) result=infra ;;
+            *) result=agent_failed ;;
+          esac
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          exit "$code"
+
+  report-pr-command:
+    needs: [gate, pr-command]
+    if: >-
+      !cancelled() && needs.gate.outputs.allowed == 'true' &&
+      (needs.pr-command.outputs.decision == 'limit_exhausted' ||
+       needs.pr-command.result == 'failure' ||
+       needs.pr-command.result == 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+    steps:
+      - name: Report the reason without running a model
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+          SHA: ${{ needs.pr-command.outputs.sha }}
+          DECISION: ${{ needs.pr-command.outputs.decision }}
+          MODEL_RESULT: ${{ needs.pr-command.outputs.model_result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          if [[ "$DECISION" == limit_exhausted ]]; then
+            reason=limit_exhausted
+          else
+            reason="${MODEL_RESULT:-infra}"
+          fi
+          sha=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid) || sha="$SHA"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            sha='недоступен; проверьте лог'
+          fi
+          body=$(printf 'Нужен человек: `%s`.\n\nHead SHA: `%s`\nЛог запуска: %s' "$reason" "$sha" "$RUN_URL")
+          printf '%s\n' "$body" | tee -a "$GITHUB_STEP_SUMMARY"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" > /dev/null
