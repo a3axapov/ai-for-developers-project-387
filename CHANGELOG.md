@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/a3axapov/ai-for-developers-project-387/compare/calendar-v0.1.0...calendar-v0.2.0) (2026-11-20)
+
+
+### Features
+
+* **ci:** добавить ежедневный аудит Lighthouse ([d5707c1](https://github.com/a3axapov/ai-for-developers-project-387/commit/d5707c1bd6ae3d28a0d554beec3de178e520fcf0))
+* **ci:** добавить ежедневный аудит Lighthouse ([685a08f](https://github.com/a3axapov/ai-for-developers-project-387/commit/685a08f977ba06e5d7ffc7c4a34ce1d9581bce9f))
+
 ## [0.1.0](https://github.com/a3axapov/ai-for-developers-project-387/compare/calendar-v0.0.1...calendar-v0.1.0) (2026-11-19)
 
 
