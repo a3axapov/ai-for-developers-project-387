@@ -12,6 +12,17 @@ export const TRUSTED_ASSOCIATIONS = Object.freeze([
 ]);
 
 const COMMAND = /(?:^|[\s,;:(])\/(?:opencode|oc)(?=$|[\s,;:).!?])/i;
+const SUPPORTED_EVENT_NAMES = Object.freeze([
+  'issue_comment',
+  'pull_request_review_comment',
+]);
+
+export function commandPrNumber(event, eventName) {
+  if (eventName === 'pull_request_review_comment')
+    return event?.pull_request?.number;
+  if (eventName === 'issue_comment' && event?.issue?.pull_request)
+    return event.issue.number;
+}
 
 function repositoryFullName(repository) {
   if (!repository || typeof repository !== 'object') return undefined;
@@ -30,14 +41,18 @@ export function decidePrCommand({
   eventName = 'issue_comment',
 }) {
   const reasons = [];
-  if (eventName !== 'issue_comment') reasons.push('event:not-issue-comment');
+  if (!SUPPORTED_EVENT_NAMES.includes(eventName))
+    reasons.push('event:unsupported');
+  if (event?.action !== 'created') reasons.push('event:not-created');
+  const number = commandPrNumber(event, eventName);
+  if (!Number.isSafeInteger(number) || number < 1)
+    reasons.push('event:not-a-pull-request');
 
-  const comment =
-    event && typeof event === 'object' ? event.comment : undefined;
-  const issue = event && typeof event === 'object' ? event.issue : undefined;
-  if (!issue?.pull_request) reasons.push('event:not-a-pull-request');
-
+  const comment = event?.comment;
+  if (!Number.isSafeInteger(comment?.id) || comment.id < 1)
+    reasons.push('comment:missing-id');
   if (comment?.user?.type === 'Bot') reasons.push('author:bot');
+  else if (comment?.user?.type !== 'User') reasons.push('author:not-human');
   if (!TRUSTED_ASSOCIATIONS.includes(comment?.author_association))
     reasons.push('author:untrusted');
   if (!COMMAND.test(String(comment?.body ?? '')))
@@ -46,6 +61,8 @@ export function decidePrCommand({
   if (!pullRequest || typeof pullRequest !== 'object') {
     reasons.push('pull-request:missing');
   } else {
+    if (number !== undefined && pullRequest.number !== number)
+      reasons.push('pull-request:number-mismatch');
     if (String(pullRequest.state ?? '').toUpperCase() !== 'OPEN')
       reasons.push('pull-request:not-open');
     const head = repositoryFullName(pullRequest.headRepository);
@@ -63,9 +80,8 @@ export function decidePrCommand({
   return { allowed: reasons.length === 0, reasons };
 }
 
-const SUPPORTED_EVENT_NAMES = Object.freeze(['issue_comment']);
 const USAGE =
-  'Usage: pr-command-gate.mjs --event FILE --pr FILE [--event-name issue_comment]';
+  'Usage: pr-command-gate.mjs --event FILE --pr FILE [--event-name issue_comment|pull_request_review_comment]';
 
 function parseArguments(argv) {
   const flags = {
@@ -86,9 +102,7 @@ function parseArguments(argv) {
     values.eventName !== undefined &&
     !SUPPORTED_EVENT_NAMES.includes(values.eventName)
   ) {
-    throw new Error(
-      `${USAGE}\nUnsupported --event-name: ${values.eventName}; expected issue_comment`,
-    );
+    throw new Error(`${USAGE}\nUnsupported --event-name: ${values.eventName}`);
   }
   return values;
 }

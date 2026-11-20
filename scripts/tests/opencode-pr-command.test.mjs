@@ -11,6 +11,7 @@ const sameRepo = { nameWithOwner: 'acme/app' };
 
 function event(overrides = {}) {
   return {
+    action: 'created',
     issue: {
       number: 7,
       pull_request: {
@@ -18,6 +19,7 @@ function event(overrides = {}) {
       },
     },
     comment: {
+      id: 42,
       body: '/oc исправь REV-1',
       author_association: 'MEMBER',
       user: { type: 'User', login: 'maintainer' },
@@ -147,10 +149,34 @@ test('a closed pull request is denied', () => {
   }
 });
 
-test('an event other than issue_comment is denied', () => {
+test('an unsupported event is denied', () => {
   const result = decide({ eventName: 'pull_request' });
   assert.equal(result.allowed, false);
-  assert.ok(result.reasons.includes('event:not-issue-comment'));
+  assert.ok(result.reasons.includes('event:unsupported'));
+});
+
+test('a created inline command follows the same trust rules as a general command', () => {
+  const inline = {
+    issue: undefined,
+    pull_request: { number: 7 },
+    comment: { ...event().comment, path: 'README.md', line: 12 },
+  };
+  const check = (overrides = {}) =>
+    decide({ eventName: 'pull_request_review_comment', ...overrides });
+  assert.deepEqual(check({ event: inline }), { allowed: true, reasons: [] });
+  for (const patch of [
+    { comment: { ...inline.comment, user: { type: 'Bot' } } },
+    { comment: { ...inline.comment, author_association: 'NONE' } },
+    { comment: { ...inline.comment, body: 'согласовано' } },
+    { action: 'edited' },
+    { pull_request: { number: 9 } },
+  ]) {
+    assert.equal(check({ event: { ...inline, ...patch } }).allowed, false);
+  }
+  assert.equal(
+    check({ event: inline, pullRequest: { isCrossRepository: true } }).allowed,
+    false,
+  );
 });
 
 test('a missing pull request payload is denied', () => {
@@ -279,8 +305,12 @@ function assertNoMainPush(job) {
 }
 
 export function assertPrCommandWorkflow(workflow) {
-  assert.deepEqual(Object.keys(workflow.on), ['issue_comment']);
+  assert.deepEqual(Object.keys(workflow.on), [
+    'issue_comment',
+    'pull_request_review_comment',
+  ]);
   assert.deepEqual(workflow.on.issue_comment.types, ['created']);
+  assert.deepEqual(workflow.on.pull_request_review_comment.types, ['created']);
   assert.equal(
     JSON.stringify(workflow).includes('pull_request_target'),
     false,
@@ -289,6 +319,7 @@ export function assertPrCommandWorkflow(workflow) {
 
   const issueJob = workflow.jobs.opencode;
   assert.ok(issueJob, 'issue job must stay');
+  assert.match(String(issueJob.if), /github\.event_name == 'issue_comment'/);
   assert.match(
     String(issueJob.if),
     /github\.event\.issue\.pull_request == null/,
@@ -328,18 +359,26 @@ export function assertPrCommandWorkflow(workflow) {
   });
   assert.equal(job['timeout-minutes'], 120);
   assert.deepEqual(job.concurrency, {
-    group: 'opencode-pr-${{ github.event.issue.number }}',
+    group:
+      'opencode-pr-${{ github.event.pull_request.number || github.event.issue.number }}',
     'cancel-in-progress': false,
+    queue: 'max',
   });
 
-  const checkout = job.steps.find((step) =>
+  const reservation = job.steps.find((step) => step.id === 'reservation');
+  assert.match(reservation.run, /node scripts\/pr-command-limit\.mjs/);
+  const checkouts = job.steps.filter((step) =>
     String(step.uses ?? '').includes('actions/checkout'),
   );
+  const trustedRef = 'refs/heads/${{ github.event.repository.default_branch }}';
+  assert.equal(gate.steps[0].with.ref, trustedRef);
+  assert.equal(checkouts[0].with.ref, trustedRef);
+  const checkout = checkouts[1];
   assert.ok(checkout, 'the PR job must check out the pull request head');
-  assert.equal(
-    checkout.with.ref,
-    'refs/pull/${{ github.event.issue.number }}/head',
-  );
+  assert.equal(checkout.with.ref, '${{ steps.reservation.outputs.sha }}');
+  assert.equal(checkout.if, "steps.reservation.outputs.decision == 'allow'");
+  assert.ok(job.steps.indexOf(checkouts[0]) < job.steps.indexOf(reservation));
+  assert.ok(job.steps.indexOf(reservation) < job.steps.indexOf(checkout));
   assert.equal(checkout.with['fetch-depth'], 0);
   assert.equal(checkout.with['persist-credentials'], false);
 
@@ -347,7 +386,10 @@ export function assertPrCommandWorkflow(workflow) {
     String(step.run ?? '').includes('git fetch'),
   );
   assert.ok(prepare, 'the PR job must fetch the base branch');
-  assert.match(String(prepare.run), /baseRefName|baseRefOid/);
+  assert.equal(
+    prepare.env.BASE_REF,
+    '${{ steps.reservation.outputs.base_ref }}',
+  );
   assert.ok(
     job.steps.some(
       (step) =>
@@ -361,6 +403,7 @@ export function assertPrCommandWorkflow(workflow) {
     (step) => String(step.run ?? '').trim() === 'opencode github run',
   );
   assert.ok(agent, 'the agent step must run opencode github run');
+  assert.equal(agent.if, "steps.reservation.outputs.decision == 'allow'");
   assert.equal(agent['timeout-minutes'], 60);
   assert.equal(agent.env.SHARE, 'false');
   assert.equal(agent.env.MENTIONS, '/opencode,/oc');
@@ -393,6 +436,11 @@ test('the contract rejects unsafe workflow variants', async () => {
     },
     'cancelling concurrency': (clone) => {
       clone.jobs[PR_JOB].concurrency['cancel-in-progress'] = true;
+    },
+    'model can run without reservation': (clone) => {
+      delete clone.jobs[PR_JOB].steps.find(
+        (step) => step.name === 'Run opencode',
+      ).if;
     },
     'agent step without the instruction file': (clone) => {
       const agent = clone.jobs[PR_JOB].steps.find(
