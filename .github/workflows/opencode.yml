@@ -25,15 +25,26 @@ jobs:
     concurrency:
       group: opencode-issue-${{ github.event.issue.number }}
       cancel-in-progress: false
+    # Long issue runs used an OIDC-exchanged GitHub App token. That token
+    # expires after one hour, so a 72-minute implement-spec run could finish
+    # its gate and then fail to push or comment. The runner's GITHUB_TOKEN
+    # stays valid for the whole job, so use it explicitly and persist the
+    # checkout credential for the agent's git push.
     permissions:
-      contents: read
-      id-token: write
+      contents: write
+      pull-requests: write
+      issues: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
-          persist-credentials: false
+          persist-credentials: true
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Install project tools
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
@@ -51,8 +62,11 @@ jobs:
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 
       - name: Run opencode
+        id: opencode
         timeout-minutes: ${{ contains(github.event.comment.body, 'implement-spec') && 165 || 15 }}
         env:
+          GITHUB_TOKEN: ${{ github.token }}
+          USE_GITHUB_TOKEN: 'true'
           MODEL: opencode/deepseek-v4.1-flash
           VARIANT: low
           MENTIONS: /opencode,/oc
@@ -66,6 +80,54 @@ jobs:
               }
             }
         run: opencode github run
+
+      - name: Preserve the agent result
+        if: always()
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          result="$RUNNER_TEMP/agent-result"
+          mkdir -p "$result"
+          branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
+          printf '%s\n' "$branch" > "$result/branch.txt"
+          git status --short > "$result/status.txt" || true
+          git log --oneline --decorate -20 > "$result/log.txt" || true
+          git diff --binary > "$result/uncommitted.patch" || true
+          # The bundle keeps commits even when the push never reached GitHub.
+          git bundle create "$result/state.bundle" --all || true
+
+      - name: Upload the agent result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: opencode-issue-${{ github.event.issue.number }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/agent-result/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish the preserved branch after a failed run
+        if: failure() && steps.opencode.outcome == 'failure'
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          branch=$(git rev-parse --abbrev-ref HEAD)
+          if [ "$branch" = "HEAD" ] || [ "$branch" = "$DEFAULT_BRANCH" ]; then
+            exit 0
+          fi
+          # Do not publish a branch when the agent produced no commits.
+          commits=$(git rev-list --count "$DEFAULT_BRANCH..HEAD" 2>/dev/null || echo 0)
+          if [ "$commits" -eq 0 ]; then
+            exit 0
+          fi
+          if ! git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git push -u origin "$branch"
+          fi
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "Ветка \`$branch\` сохранена на GitHub после сбоя публикации. Модель повторно не вызывалась. Откройте PR вручную. Артефакт запуска: $RUN_URL"
 
   gate:
     if: >-

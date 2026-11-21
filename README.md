@@ -827,13 +827,22 @@ opencode mcp list
   поэтому недоверенный код не попадает на раннер с секретами.
 - Модель: `opencode/deepseek-v4.1-flash` с reasoning `low`. Ключ хранится в GitHub Actions secret
   `OPENCODE_API_KEY` и не попадает в репозиторий.
-- Авторизация: установлен GitHub App `opencode-agent`; воркфлоу использует OIDC
-  (`id-token: write`) и получает токен приложения. Поэтому у задания только
-  `contents: read`, а checkout идёт с `persist-credentials: false`.
+- Авторизация: задание использует `GITHUB_TOKEN` раннера
+  (`USE_GITHUB_TOKEN: "true"`) и явно запрашивает `contents: write`,
+  `pull-requests: write`, `issues: write`. Checkout сохраняет credential
+  (`persist-credentials: true`), а git identity настраивается отдельным шагом.
+  Это сознательный отказ от OIDC-обмена на токен GitHub App: installation token
+  живёт один час, а `implement-spec` идёт дольше, поэтому прежний запуск
+  терял готовые коммиты на push и комментарии. `id-token` больше не нужен.
 - Назначение: разобрать issue, ответить в нём, при реализации — создать ветку
   и открыть PR. Прямой push в `main` и merge не выполняются.
 - Результат: комментарий агента в issue, ссылка на PR (если были изменения)
   и запуск в Actions.
+- Артефакт результата: шаг `Preserve the agent result` складывает `git status`,
+  журнал коммитов и bundle в artifact `opencode-issue-<номер>-<run_id>`.
+  Если `opencode github run` упал после коммитов, шаг
+  `Publish the preserved branch after a failed run` пушит ветку тем же
+  `GITHUB_TOKEN` и оставляет в issue комментарий; модель повторно не вызывается.
 - Сессии не публикуются, потому что репозиторий публичный: воркфлоу передаёт
   `SHARE: "false"`, а конфиг OpenCode по умолчанию (`share: manual`) ничего не
   публикует автоматически.
@@ -883,11 +892,12 @@ opencode mcp list
 Правила отмены, повторных запусков и живая проверка описаны в
 [`docs/agents/pr-command.md`](docs/agents/pr-command.md).
 
-Если GitHub App установить нельзя, воркфлоу можно переключить на `USE_GITHUB_TOKEN: "true"`.
-Тогда `id-token` не нужен, но требуются `contents: write`, `pull-requests: write`,
-`issues: write`, а в env задания нужно передать `GITHUB_TOKEN: ${{ github.token }}`.
-Отличие: агент действует от `GITHUB_TOKEN`, а не от отдельного приложения, и получает
-более широкие права.
+`USE_GITHUB_TOKEN: "true"`: `id-token` не нужен, нужны
+`contents: write`, `pull-requests: write`, `issues: write`, а в env передаётся
+`GITHUB_TOKEN: ${{ github.token }}`. Токен раннера живёт весь job, так что длинный
+`implement-spec` не теряет результат на часовом сроке installation token.
+Минус режима: агент действует от `GITHUB_TOKEN` и получает более широкие права;
+PR из fork по-прежнему не запускают этот воркфлоу.
 
 Перед первым запуском:
 
