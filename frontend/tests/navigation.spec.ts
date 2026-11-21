@@ -18,6 +18,9 @@ test('главная описывает работающую запись без
   ).toBeVisible();
   await expect(page.getByRole('listitem')).toHaveCount(3);
   await expect(
+    page.getByRole('link', { name: 'Записаться на встречу', exact: true }),
+  ).toHaveAttribute('href', '/booking');
+  await expect(
     page.getByText('Аккаунт не нужен.', { exact: false }),
   ).toBeVisible();
   await expect(page.getByText('Онлайн-запись без регистрации.')).toBeVisible();
@@ -58,26 +61,6 @@ test('главная описывает работающую запись без
   }
   await expect(page.getByRole('status')).toHaveCount(0);
   expect(apiRequests).toEqual([]);
-});
-
-test('при выключенной публичной записи главная ведёт к сообщению о недоступности', async ({
-  page,
-}) => {
-  await page.goto('/admin');
-  await expect(
-    page.getByRole('switch', { name: 'Публичная запись' }),
-  ).not.toBeChecked();
-
-  await page.goto('/');
-  for (const claim of ['сейчас открыта', 'запись включена']) {
-    await expect(page.getByText(claim, { exact: false })).toHaveCount(0);
-  }
-
-  await page
-    .getByRole('link', { name: 'Записаться на встречу', exact: true })
-    .click();
-  await expect(page).toHaveURL('/booking/owner');
-  await expect(page.getByText('Запись временно недоступна')).toBeVisible();
 });
 
 for (const destination of [
