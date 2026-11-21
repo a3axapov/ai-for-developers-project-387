@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 
-test('главная объясняет будущую запись без регистрации', async ({ page }) => {
+test('главная описывает работающую запись без регистрации', async ({
+  page,
+}) => {
   const apiRequests: string[] = [];
   page.on('request', (request) => {
     if (new URL(request.url()).pathname.startsWith('/api/')) {
@@ -18,12 +20,66 @@ test('главная объясняет будущую запись без ре�
   await expect(
     page.getByText('Аккаунт не нужен.', { exact: false }),
   ).toBeVisible();
-  await expect(page.getByText('Скоро — онлайн-запись.')).toBeVisible();
+  await expect(
+    page.getByText('Онлайн-запись без регистрации.'),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      'По ссылке владельца календаря вы выбираете тип встречи и свободное время — без переписки и регистрации.',
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Как это работает', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      'Выберите встречу, время и оставьте контакты — запись займёт несколько минут.',
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Возможности записи', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('Эти возможности уже доступны.')).toBeVisible();
+  await expect(
+    page.getByText(
+      'После записи можно скачать файл .ics и добавить встречу в свой календарь.',
+    ),
+  ).toBeVisible();
   await expect(
     page.getByText('Встреча в вашем календаре', { exact: true }),
   ).toBeVisible();
+  for (const stale of [
+    'Скоро — онлайн-запись',
+    'Сервис в разработке',
+    'ещё готовится',
+    'Здесь появится',
+    'Как это будет работать',
+    'появятся вместе',
+  ]) {
+    await expect(page.getByText(stale, { exact: false })).toHaveCount(0);
+  }
   await expect(page.getByRole('status')).toHaveCount(0);
   expect(apiRequests).toEqual([]);
+});
+
+test('при выключенной публичной записи главная ведёт к сообщению о недоступности', async ({
+  page,
+}) => {
+  await page.goto('/admin');
+  await expect(
+    page.getByRole('switch', { name: 'Публичная запись' }),
+  ).not.toBeChecked();
+
+  await page.goto('/');
+  for (const claim of ['сейчас открыта', 'запись включена']) {
+    await expect(page.getByText(claim, { exact: false })).toHaveCount(0);
+  }
+
+  await page
+    .getByRole('link', { name: 'Записаться на встречу', exact: true })
+    .click();
+  await expect(page).toHaveURL('/booking/owner');
+  await expect(page.getByText('Запись временно недоступна')).toBeVisible();
 });
 
 for (const destination of [
