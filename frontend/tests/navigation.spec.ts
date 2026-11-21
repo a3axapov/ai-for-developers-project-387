@@ -20,9 +20,7 @@ test('главная описывает работающую запись без
   await expect(
     page.getByText('Аккаунт не нужен.', { exact: false }),
   ).toBeVisible();
-  await expect(
-    page.getByText('Онлайн-запись без регистрации.'),
-  ).toBeVisible();
+  await expect(page.getByText('Онлайн-запись без регистрации.')).toBeVisible();
   await expect(
     page.getByText(
       'По ссылке владельца календаря вы выбираете тип встречи и свободное время — без переписки и регистрации.',
