@@ -39,7 +39,7 @@ function HomePage() {
             Записаться на встречу <span aria-hidden="true">↗</span>
           </a>
           <p className="availability-note" id="booking-note">
-            Скоро — онлайн-запись. Сервис в разработке.
+            Онлайн-запись без регистрации.
           </p>
         </div>
         <aside className="intro-card" aria-labelledby="intro-title">
@@ -49,8 +49,8 @@ function HomePage() {
           <p className="eyebrow">Место для ваших планов</p>
           <h2 id="intro-title">Одна ссылка. Понятный следующий шаг.</h2>
           <p>
-            Здесь появится запись на встречи с владельцем календаря. Вы сможете
-            выбрать время самостоятельно, а не искать его в переписке.
+            По ссылке владельца календаря вы выбираете тип встречи и свободное
+            время — без переписки и регистрации.
           </p>
           <div className="card-detail">
             <span aria-hidden="true">◷</span> В вашем часовом поясе
@@ -61,10 +61,13 @@ function HomePage() {
       <section className="steps-section" aria-labelledby="steps-title">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Как это будет работать</p>
+            <p className="eyebrow">Как это работает</p>
             <h2 id="steps-title">От выбора до встречи — три шага</h2>
           </div>
-          <p>Онлайн-запись ещё готовится. Вот что станет доступно.</p>
+          <p>
+            Выберите встречу, время и оставьте контакты — запись займёт
+            несколько минут.
+          </p>
         </div>
         <ol className="steps">
           {steps.map((step, index) => (
@@ -81,9 +84,9 @@ function HomePage() {
 
       <section className="features-section" aria-labelledby="features-title">
         <div>
-          <p className="eyebrow">Продумано заранее</p>
+          <p className="eyebrow">Возможности записи</p>
           <h2 id="features-title">Всё важное — в одном месте</h2>
-          <p>Эти возможности появятся вместе с онлайн-записью.</p>
+          <p>Эти возможности уже доступны.</p>
         </div>
         <dl className="features">
           <div>
@@ -102,8 +105,8 @@ function HomePage() {
           <div>
             <dt>Встреча в вашем календаре</dt>
             <dd>
-              После записи можно будет скачать файл .ics и самостоятельно
-              добавить встречу в свой календарь.
+              После записи можно скачать файл .ics и добавить встречу в свой
+              календарь.
             </dd>
           </div>
         </dl>
